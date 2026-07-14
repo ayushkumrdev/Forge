@@ -22,13 +22,37 @@ forge run "add input validation to the signup endpoint" --repo path/to/project -
 ```
 
 - **Planner** turns your request plus a repository snapshot (file tree, languages,
-  Python symbols) into a small ordered task list with complexity estimates.
+  multi-language symbols) into a small ordered task list — informed by **execution
+  memory**: lessons from similar past runs are recalled and injected so known
+  mistakes aren't repeated.
 - **Coder** works like Claude Code: it calls tools in a loop — `read_file`,
-  `edit_file`, `write_file`, `grep`, `find_files`, `list_dir`, `run_command`, `git` —
-  reading code before changing it and making minimal targeted edits.
+  `edit_file`, `write_file`, `grep`, `find_files`, `list_dir`, `run_command`, `git`,
+  plus code intelligence (`find_symbol`, `who_imports`) and hybrid retrieval
+  (`search_code`) — reading code before changing it and making minimal targeted edits.
 - **Reviewer** is independent from the coder. It judges the *actual unified diff* and
   the results of your `--check` commands, then approves or returns concrete issues
   that are fed back to the coder for another attempt (up to `FORGE_MAX_REVIEW_CYCLES`).
+
+## Repository intelligence & retrieval
+
+- Symbols for Python (stdlib `ast`) and TypeScript/JavaScript/Go/Rust/Java and more
+  (tree-sitter, with regex fallback), cached per file in `.forge/repo_index.json`.
+- An import graph (Python + JS/TS resolution) powers `who_imports` — blast-radius
+  checks before an edit.
+- Hybrid search: symbol-aware chunking, BM25 with a code-aware tokenizer, optional
+  dense embeddings via Ollama (`FORGE_EMBEDDING_MODEL=nomic-embed-text`), fused
+  with reciprocal-rank fusion.
+
+## Dashboard
+
+```powershell
+forge serve --repo path\to\project    # http://127.0.0.1:8321
+```
+
+A self-contained web dashboard (no CDN, works offline): submit runs, watch the live
+agent event feed, inspect diffs, browse the repository snapshot and learned lessons.
+The same REST API (`/api/runs`, `/api/repo`, `/api/memory`, `/api/health`, docs at
+`/docs`) is usable programmatically.
 
 ## Safety, always on
 
@@ -80,13 +104,16 @@ src/forge/
   llm/             provider-agnostic LLM interface; Ollama + mock clients
   safety/          command blocklist, path confinement, VCS protection
   tools/           tool interface, registry, change ledger (backups/diffs),
-                   filesystem / terminal / search / git tools
-  repo/            repository scanner: tree, language stats, Python symbols
+                   filesystem / terminal / search / git / code-intel /
+                   retrieval tools
+  repo/            scanner, multi-language symbols (tree-sitter), import graph
+  retrieval/       BM25 + optional embeddings, symbol-aware chunking, RRF
   agents/          Planner, Coder, Reviewer + shared tool-loop engine
   orchestrator/    the plan → code → check → review → iterate loop
-  memory/          SQLite run/event store
-  cli.py           forge doctor | index | plan | run | history
-tests/             unit + mocked end-to-end tests
+  memory/          SQLite run/event store + execution memory (lessons)
+  server/          FastAPI API + bundled web dashboard
+  cli.py           forge doctor | index | plan | run | serve | memory | history
+tests/             unit + mocked end-to-end tests (101 tests)
 docs/              architecture and roadmap
 ```
 

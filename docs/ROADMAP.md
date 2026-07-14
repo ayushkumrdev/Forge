@@ -14,32 +14,33 @@ behind an existing interface.
 - SQLite execution memory, JSONL traces, rich console telemetry
 - CLI: `doctor`, `index`, `plan`, `run`, `history`
 - Inline tool-call recovery for local model templates that emit JSON-in-content
-- 69 tests, ~92% coverage; verified live against qwen2.5-coder:7b
+- 101 tests, ~93% coverage; full autonomous run (plan → code → test → review →
+  approve, multi-file with imports) verified live against qwen2.5-coder:7b
 
-## Milestone 2 — Repository intelligence
-- Tree-sitter parsing for TypeScript/JavaScript/Go/Rust/Java (symbols, imports)
-- Import & dependency graphs (networkx first; Neo4j behind the same interface)
-- Symbol lookup tool for agents (`find_symbol`, `who_imports`)
-- Persistent index cache in `.forge/` with invalidation on file change
+## ✅ Milestone 2 — Repository intelligence
+- Tree-sitter parsing for TypeScript/JavaScript/Go/Rust/Java + more (with
+  regex fallback when tree-sitter is unavailable)
+- Import graph with Python (absolute/relative/src-layout) and JS/TS resolution
+- Symbol lookup tools for agents: `find_symbol`, `who_imports`
+- Persistent index cache in `.forge/repo_index.json` keyed by mtime+size
 
-## Milestone 3 — Retrieval
-- Hybrid retrieval: BM25 (rank-bm25) + dense embeddings (Ollama embeddings,
-  `nomic-embed-text`) over chunked code
-- Qdrant as the vector store (embedded/local mode), AST-aware chunking
-- `search_code` tool so the coder retrieves context instead of scanning blindly
+## ✅ Milestone 3 — Retrieval
+- Hybrid retrieval: pure-Python BM25 (code-aware tokenizer: camelCase/snake
+  splitting, light stemming, stopwords) + optional Ollama dense embeddings
+  (`FORGE_EMBEDDING_MODEL`), fused with reciprocal-rank fusion
+- Symbol-aware chunking with windowed fallback
+- `search_code` agent tool
 
-## Milestone 4 — Memory layers
-- Project memory: persisted repository understanding across runs
-- Execution memory: surface past failures/fixes for similar tasks at plan time
-- Knowledge memory: architecture decisions recorded and queryable
+## ✅ Milestone 4 — Execution memory
+- Task outcomes persisted as lessons (request, task, verdict, reviewer issues)
+- Similar past lessons recalled via BM25 into the planner prompt
+- `forge memory` CLI command
 
-## Milestone 5 — Service + dashboard
-- FastAPI backend: repository indexing, task submission, status, logs, metrics
-- WebSocket streaming of run events
-- Next.js + Tailwind + shadcn/ui dashboard: repo tree, execution timeline,
-  live tool calls, diff viewer, run history, metrics
-- Runs move from in-process to a worker (Celery/Redis) behind the same
-  `ExecutionLoop` interface
+## ✅ Milestone 5 — Service + dashboard
+- FastAPI backend: health, repo snapshot, run submission with background
+  execution, run reports, event traces, lessons (`/docs` for OpenAPI)
+- Self-contained dark web dashboard: live run feed, diff viewer, repo and
+  memory views; `forge serve`
 
 ## Milestone 6 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
