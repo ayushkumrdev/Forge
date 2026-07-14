@@ -42,7 +42,15 @@ behind an existing interface.
 - Self-contained dark web dashboard: live run feed, diff viewer, repo and
   memory views; `forge serve`
 
-## Milestone 6 — Execution isolation & scale
+## ✅ Milestone 6 — Interactive chat (the Claude Code experience)
+- `forge chat`: persistent multi-turn tool-loop session on the repository
+- Permission system: ask-before-write/command by default, `--auto` to skip;
+  read-only tools never prompt; per-session "always allow"
+- FORGE.md / CLAUDE.md project instructions loaded into system prompts
+- Slash commands: /diff /undo /run /init /model /compact /clear /help /exit
+- @file mentions, LLM history compaction, transcript resume, ledger-based undo
+
+## Milestone 7 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics

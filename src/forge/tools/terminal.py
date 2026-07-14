@@ -13,6 +13,7 @@ from forge.tools.base import Tool, ToolResult
 
 class RunCommandTool(Tool):
     name = "run_command"
+    mutating = True
     description = (
         "Run a shell command in the repository root (e.g. tests, linters, "
         "build steps). Returns exit code, stdout and stderr. Destructive "

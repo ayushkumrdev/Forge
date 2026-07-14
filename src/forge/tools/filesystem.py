@@ -56,6 +56,7 @@ class ReadFileTool(Tool):
 
 class WriteFileTool(Tool):
     name = "write_file"
+    mutating = True
     description = (
         "Create a new file or fully replace an existing one. The previous "
         "content is automatically backed up. Prefer edit_file for small changes."
@@ -83,6 +84,7 @@ class WriteFileTool(Tool):
 
 class EditFileTool(Tool):
     name = "edit_file"
+    mutating = True
     description = (
         "Replace an exact text snippet in a file. old_string must appear "
         "exactly once — read the file first to copy it precisely."

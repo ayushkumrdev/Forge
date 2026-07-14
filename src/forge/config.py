@@ -33,3 +33,6 @@ class ForgeSettings(BaseSettings):
     # retrieval and the engine runs BM25-only (e.g. "nomic-embed-text")
     embedding_model: str = ""
     retrieval_top_k: int = 5
+
+    # Chat — history length that triggers LLM compaction of older turns
+    chat_compact_threshold: int = 30

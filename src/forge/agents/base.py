@@ -20,6 +20,20 @@ class AgentOutcome(BaseModel):
     usage: Usage = Field(default_factory=Usage)
 
 
+def recover_inline_tool_call(message: ChatMessage, known_tools: list[str]) -> ChatMessage:
+    """Some local model templates emit tool calls as JSON text in the content
+    instead of the native tool_calls field (qwen2.5-coder via Ollama does
+    this). Recover them so the loop still works — but only when the JSON
+    names a registered tool, so real answers that merely contain JSON are
+    never misread as calls."""
+    if message.tool_calls or not message.content:
+        return message
+    call = extract_tool_call(message.content)
+    if call is None or call.name not in known_tools:
+        return message
+    return message.model_copy(update={"tool_calls": [call], "content": ""})
+
+
 class ToolLoopAgent:
     def __init__(
         self,
@@ -89,15 +103,9 @@ class ToolLoopAgent:
         )
 
     def _recover_inline_tool_call(self, message: ChatMessage) -> ChatMessage:
-        """Some local model templates emit tool calls as JSON text in the
-        content instead of the native tool_calls field (qwen2.5-coder via
-        Ollama does this). Recover them so the loop still works — but only
-        when the JSON names a registered tool, so real answers that merely
-        contain JSON are never misread as calls."""
-        if message.tool_calls or not message.content:
-            return message
-        call = extract_tool_call(message.content)
-        if call is None or call.name not in self._registry.names():
-            return message
-        self._recorder.event(self.name, "inline_tool_call_recovered", tool=call.name)
-        return message.model_copy(update={"tool_calls": [call], "content": ""})
+        recovered = recover_inline_tool_call(message, self._registry.names())
+        if recovered is not message and recovered.tool_calls:
+            self._recorder.event(
+                self.name, "inline_tool_call_recovered", tool=recovered.tool_calls[0].name
+            )
+        return recovered

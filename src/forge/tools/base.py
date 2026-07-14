@@ -34,6 +34,7 @@ class Tool(ABC):
     name: str
     description: str
     parameters: dict[str, Any]
+    mutating: bool = False  # True when the tool changes files or system state
 
     def spec(self) -> ToolSpec:
         return ToolSpec(name=self.name, description=self.description, parameters=self.parameters)
@@ -43,8 +44,9 @@ class Tool(ABC):
 
 
 class ToolRegistry:
-    def __init__(self, tools: list[Tool] | None = None) -> None:
+    def __init__(self, tools: list[Tool] | None = None, policy=None) -> None:
         self._tools: dict[str, Tool] = {}
+        self.policy = policy  # forge.safety.permissions.PermissionPolicy | None
         for tool in tools or []:
             self.register(tool)
 
@@ -66,6 +68,10 @@ class ToolRegistry:
                 ok=False,
                 error=f"Unknown tool {name!r}. Available tools: {', '.join(self._tools)}",
             )
+        if self.policy is not None:
+            denial = self.policy.check(name, tool.mutating, arguments)
+            if denial:
+                return ToolResult(ok=False, error=denial)
         try:
             return tool.run(**arguments)
         except SafetyViolation as exc:

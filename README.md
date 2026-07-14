@@ -7,8 +7,25 @@ files through safe tools, runs your checks, reviews its own diff, and iterates u
 change passes review.
 
 ```
+forge chat --repo path/to/project        # interactive, Claude Code-style
 forge run "add input validation to the signup endpoint" --repo path/to/project --check "pytest -q"
 ```
+
+## Chat mode — the Claude Code experience
+
+`forge chat` opens an interactive session on your repository:
+
+- Converse naturally; Forge answers questions in text and makes changes with tools.
+- **Permissions**: by default Forge asks before every file write or shell command
+  (`--auto` to skip prompts). Read-only tools never prompt.
+- **@file mentions** inline a file's content into your message: `explain @src/app.py`.
+- **Slash commands**: `/diff` (session changes), `/undo` (revert them all),
+  `/run <task>` (hand off to the full plan→code→review loop), `/init` (generate
+  FORGE.md), `/model [name]`, `/compact`, `/clear`, `/help`, `/exit`.
+- **FORGE.md** (or CLAUDE.md) at the repo root is loaded into the system prompt —
+  project conventions the agent must follow.
+- **Continuity**: history persists across turns, long conversations are compacted
+  with an LLM summary, and `--resume` restores your previous session.
 
 ## How it works
 
@@ -111,8 +128,10 @@ src/forge/
   agents/          Planner, Coder, Reviewer + shared tool-loop engine
   orchestrator/    the plan → code → check → review → iterate loop
   memory/          SQLite run/event store + execution memory (lessons)
+  chat/            interactive session: history, mentions, compaction,
+                   slash commands, FORGE.md instructions
   server/          FastAPI API + bundled web dashboard
-  cli.py           forge doctor | index | plan | run | serve | memory | history
+  cli.py           forge chat | run | serve | plan | index | memory | history | doctor
 tests/             unit + mocked end-to-end tests (101 tests)
 docs/              architecture and roadmap
 ```

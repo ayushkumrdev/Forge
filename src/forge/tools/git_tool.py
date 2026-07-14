@@ -18,6 +18,7 @@ _ALLOWED_SUBCOMMANDS = {
 
 class GitTool(Tool):
     name = "git"
+    mutating = True
     description = (
         "Run a git command in the repository. Allowed subcommands: "
         "status, diff, log, show, branch, add, commit, stash, ls-files, "

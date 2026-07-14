@@ -174,6 +174,72 @@ def run(
 
 
 @app.command()
+def chat(
+    repo: Path = typer.Option(Path("."), help="Target repository."),
+    model: Optional[str] = typer.Option(None, help="Override the Ollama model."),
+    auto: bool = typer.Option(
+        False, "--auto", help="Skip permission prompts (auto-approve writes/commands)."
+    ),
+    resume: bool = typer.Option(False, "--resume", help="Resume the previous chat session."),
+) -> None:
+    """Interactive session — work with Forge like Claude Code, on your repo."""
+    from rich.markdown import Markdown
+    from rich.prompt import Confirm
+
+    from forge.chat import commands as chat_commands
+    from forge.chat.session import ChatSession
+    from forge.safety.permissions import PermissionPolicy
+
+    settings = _settings(model)
+    workspace = repo.resolve()
+
+    def approver(tool_name: str, detail: str) -> bool:
+        console.print(f"\n[yellow]Forge wants to run[/yellow] [bold]{tool_name}[/bold] {detail}")
+        return Confirm.ask("Allow?", default=True)
+
+    policy = PermissionPolicy("auto") if auto else PermissionPolicy("ask", approver)
+    store = MemoryStore(workspace)
+    recorder = Recorder("chat", workspace, store=store, console=console, verbose=True)
+    with console.status("[dim]indexing repository…[/dim]"):
+        session = ChatSession(
+            workspace, _client(settings), settings, policy=policy, recorder=recorder
+        )
+    if resume and session.load_transcript():
+        console.print(f"[dim]Resumed previous session ({len(session.history)} messages).[/dim]")
+
+    mode = "auto-approve" if auto else "ask before writes/commands"
+    console.print(
+        Panel(
+            f"[bold]Forge chat[/bold] — {settings.model} · {mode}\n"
+            f"repo: {workspace}\nType a request, /help for commands, /exit to leave.",
+            border_style="dim",
+        )
+    )
+    while True:
+        try:
+            line = console.input("\n[bold cyan]forge>[/bold cyan] ").strip()
+        except (KeyboardInterrupt, EOFError):
+            console.print("\n[dim]bye.[/dim]")
+            break
+        if not line:
+            continue
+        if chat_commands.is_command(line):
+            result = chat_commands.execute(session, line)
+            if result.text:
+                console.print(result.text)
+            if result.should_exit:
+                break
+            continue
+        try:
+            reply = session.send(line)
+        except Exception as exc:  # noqa: BLE001 — REPL must survive errors
+            console.print(f"[red]error:[/red] {exc}")
+            continue
+        console.print(Markdown(reply))
+    store.close()
+
+
+@app.command()
 def serve(
     repo: Path = typer.Option(Path("."), help="Target repository."),
     host: str = typer.Option("127.0.0.1", help="Bind address."),

@@ -37,6 +37,20 @@ class ChangeLedger:
             for path in self._originals
         )
 
+    def restore_all(self) -> list[str]:
+        """Undo: put every touched file back to its pre-run state. Files that
+        did not exist before are deleted. Returns the restored paths."""
+        restored: list[str] = []
+        for path, original in sorted(self._originals.items()):
+            if original is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(original, encoding="utf-8")
+            restored.append(str(path.relative_to(self.workspace)).replace("\\", "/"))
+        self._originals.clear()
+        return restored
+
     def unified_diff(self) -> str:
         """Diff of all recorded files: original content vs. current on-disk."""
         chunks: list[str] = []
