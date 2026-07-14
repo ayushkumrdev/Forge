@@ -14,7 +14,15 @@ _CAMEL_RE = re.compile(r"[A-Z]+(?![a-z])|[A-Z][a-z]+|[a-z]+|\d+")
 # common English noise words that would otherwise dominate natural-language
 # queries like "where are user sessions validated"
 _STOPWORDS = frozenset(
-    ["the", "a", "an", "is", "are", "was", "were", "be", "been", "being", "to", "of", "in", "on", "for", "and", "or", "not", "no", "with", "as", "at", "by", "it", "its", "this", "that", "these", "those", "from", "into", "how", "what", "when", "where", "which", "who", "whom", "why", "do", "does", "did", "done", "can", "could", "should", "would", "will", "i", "we", "you", "they", "he", "she", "them", "us", "our", "your", "my"]
+    [
+        "the", "a", "an", "is", "are", "was", "were", "be", "been", "being",
+        "to", "of", "in", "on", "for", "and", "or", "not", "no", "with",
+        "as", "at", "by", "it", "its", "this", "that", "these", "those",
+        "from", "into", "how", "what", "when", "where", "which", "who",
+        "whom", "why", "do", "does", "did", "done", "can", "could",
+        "should", "would", "will", "i", "we", "you", "they", "he", "she",
+        "them", "us", "our", "your", "my",
+    ]
 )
 
 
