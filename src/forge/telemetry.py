@@ -4,6 +4,7 @@ console (live progress), a JSONL trace file, and the SQLite memory store."""
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -21,11 +22,13 @@ class Recorder:
         store: MemoryStore | None = None,
         console: Console | None = None,
         verbose: bool = True,
+        sink: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.run_id = run_id
         self._store = store
         self._console = console
         self._verbose = verbose
+        self._sink = sink
         log_dir = workspace / ".forge" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         self._jsonl_path = log_dir / f"{run_id}.jsonl"
@@ -42,6 +45,8 @@ class Recorder:
             handle.write(json.dumps(record, default=str) + "\n")
         if self._store is not None:
             self._store.add_event(self.run_id, agent, kind, payload)
+        if self._sink is not None:
+            self._sink(record)
         if self._console is not None and self._verbose:
             self._console.print(self._format(agent, kind, payload))
 

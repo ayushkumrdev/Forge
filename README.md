@@ -7,9 +7,25 @@ files through safe tools, runs your checks, reviews its own diff, and iterates u
 change passes review.
 
 ```
-forge chat --repo path/to/project        # interactive, Claude Code-style
+forge app                                # desktop app: chat window + folder picker
+forge chat --repo path/to/project        # same experience in the terminal
 forge run "add input validation to the signup endpoint" --repo path/to/project --check "pytest -q"
 ```
+
+## The desktop app
+
+`forge app` opens Forge as a native window (`forge shortcut` puts it on your
+desktop). Pick a project folder to give Forge access, then just talk:
+
+- Chat like you would with Claude — Forge reads, searches, edits and builds in
+  the selected folder, showing every tool action live in the thread.
+- **Ask mode** (default): every file write or command pops an approval dialog —
+  Deny / Allow / Allow always. Auto mode skips the prompts.
+- **Switch models anytime** from the dropdown — it lists whatever `ollama list`
+  has. Running a 7B today and a bigger model after a GPU upgrade is one click.
+- Diff viewer and one-click **Undo all** for everything the session changed.
+- Change folders anytime; each folder keeps its own memory and history under
+  `.forge/`. Everything runs 100% locally.
 
 ## Chat mode — the Claude Code experience
 

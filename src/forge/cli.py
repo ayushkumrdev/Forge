@@ -173,6 +173,87 @@ def run(
         raise typer.Exit(1)
 
 
+@app.command(name="app")
+def desktop_app(
+    repo: Path = typer.Option(Path("."), help="Initial project folder (changeable in-app)."),
+    model: Optional[str] = typer.Option(None, help="Override the Ollama model."),
+    port: int = typer.Option(8322, help="Local port for the app backend."),
+) -> None:
+    """Open Forge as a desktop app: chat window, folder picker, model switcher."""
+    import threading
+
+    import uvicorn
+
+    from forge.server.app import create_app
+
+    try:
+        import webview
+    except ImportError as exc:  # pragma: no cover - packaging problem
+        console.print(f"[red]pywebview is not installed:[/red] {exc}")
+        console.print("Install it with: pip install pywebview")
+        raise typer.Exit(1) from exc
+
+    settings = _settings(model)
+    workspace = repo.resolve()
+    backend = create_app(workspace, settings)
+
+    server = uvicorn.Server(
+        uvicorn.Config(backend, host="127.0.0.1", port=port, log_level="warning")
+    )
+    threading.Thread(target=server.run, daemon=True).start()
+
+    class Bridge:
+        def pick_folder(self):
+            result = window.create_file_dialog(webview.FOLDER_DIALOG)
+            if result:
+                return result[0] if isinstance(result, (list, tuple)) else result
+            return None
+
+    window = webview.create_window(
+        "Forge — local AI engineer",
+        f"http://127.0.0.1:{port}/app",
+        width=1180,
+        height=820,
+        min_size=(860, 600),
+        js_api=Bridge(),
+        background_color="#0d1117",
+    )
+    webview.start()
+
+
+@app.command()
+def shortcut() -> None:
+    """Put a Forge shortcut on the Windows desktop (launches the app window)."""
+    import subprocess
+    import sys
+
+    forge_exe = Path(sys.executable).parent / "forge.exe"
+    if not forge_exe.exists():
+        console.print(f"[red]forge.exe not found at {forge_exe}[/red]")
+        raise typer.Exit(1)
+    script = (
+        "$ws = New-Object -ComObject WScript.Shell; "
+        "$lnk = $ws.CreateShortcut([IO.Path]::Combine("
+        "[Environment]::GetFolderPath('Desktop'), 'Forge.lnk')); "
+        f"$lnk.TargetPath = '{forge_exe}'; "
+        "$lnk.Arguments = 'app'; "
+        f"$lnk.WorkingDirectory = '{Path.home()}'; "
+        "$lnk.Description = 'Forge - local AI software engineer'; "
+        "$lnk.Save()"
+    )
+    completed = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if completed.returncode == 0:
+        console.print("[green]Created 'Forge' shortcut on your desktop.[/green]")
+    else:
+        console.print(f"[red]Failed:[/red] {completed.stderr.strip()}")
+        raise typer.Exit(1)
+
+
 @app.command()
 def chat(
     repo: Path = typer.Option(Path("."), help="Target repository."),

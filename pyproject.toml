@@ -20,6 +20,7 @@ dependencies = [
     "tree-sitter-language-pack>=0.13",
     "fastapi>=0.111",
     "uvicorn>=0.30",
+    "pywebview>=5.1",
 ]
 
 [project.optional-dependencies]

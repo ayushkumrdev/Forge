@@ -50,7 +50,15 @@ behind an existing interface.
 - Slash commands: /diff /undo /run /init /model /compact /clear /help /exit
 - @file mentions, LLM history compaction, transcript resume, ledger-based undo
 
-## Milestone 7 — Execution isolation & scale
+## ✅ Milestone 7 — Desktop app
+- `forge app`: native desktop window (pywebview) with a full chat UI
+- Folder picker (native dialog) scopes Forge's access; switch folders anytime
+- Model switcher dropdown listing installed Ollama models — swap mid-session
+- Ask/Auto permission modes with approval dialogs (Deny / Allow / Allow always)
+- Live tool-activity feed, diff viewer, one-click undo of session changes
+- `forge shortcut` installs a desktop shortcut
+
+## Milestone 8 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics

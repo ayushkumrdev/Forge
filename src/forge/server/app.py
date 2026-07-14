@@ -15,6 +15,7 @@ from forge.config import ForgeSettings
 from forge.llm.ollama import OllamaClient
 from forge.memory.store import MemoryStore
 from forge.repo.scanner import RepoScanner
+from forge.server.chat_api import ChatLLMFactory, ChatManager, build_chat_router
 from forge.server.runs import LLMFactory, RunManager
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -29,6 +30,7 @@ def create_app(
     workspace: Path,
     settings: ForgeSettings | None = None,
     llm_factory: LLMFactory | None = None,
+    chat_llm_factory: ChatLLMFactory | None = None,
 ) -> FastAPI:
     workspace = workspace.resolve()
     settings = settings or ForgeSettings()
@@ -42,9 +44,21 @@ def create_app(
             timeout_s=settings.request_timeout_s,
         )
 
+    def default_chat_llm(model: str | None) -> OllamaClient:
+        return OllamaClient(
+            host=settings.ollama_host,
+            model=model or settings.model,
+            temperature=settings.temperature,
+            num_ctx=settings.num_ctx,
+            timeout_s=settings.request_timeout_s,
+        )
+
     manager = RunManager(workspace, settings, llm_factory or default_llm)
+    chat_manager = ChatManager(workspace, settings, chat_llm_factory or default_chat_llm)
     app = FastAPI(title="Forge", version=__version__)
     app.state.manager = manager
+    app.state.chat_manager = chat_manager
+    app.include_router(build_chat_router(chat_manager))
 
     # -- meta -------------------------------------------------------------------
 
@@ -66,6 +80,14 @@ def create_app(
             "ollama_reachable": ollama_ok,
             "model_available": model_ok,
         }
+
+    @app.get("/api/models")
+    def models() -> list[str]:
+        """Installed Ollama models — the app's model-switcher dropdown."""
+        try:
+            return OllamaClient(host=settings.ollama_host).list_models()
+        except Exception:  # noqa: BLE001 — no Ollama, empty dropdown
+            return []
 
     # -- repository -------------------------------------------------------------
 
@@ -140,5 +162,9 @@ def create_app(
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
         return FileResponse(_STATIC_DIR / "index.html")
+
+    @app.get("/app", include_in_schema=False)
+    def desktop_app() -> FileResponse:
+        return FileResponse(_STATIC_DIR / "app.html")
 
     return app

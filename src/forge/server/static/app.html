@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Forge</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel2: #1d232c; --border: #2b3138;
+    --text: #e6edf3; --dim: #8b949e; --accent: #e8833a; --accent-soft: #3a2718;
+    --ok: #3fb950; --err: #f85149; --warn: #d29922; --info: #58a6ff;
+    --mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    --sans: "Segoe UI", system-ui, sans-serif;
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); display: flex; flex-direction: column; overflow: hidden; }
+
+  /* ── top bar ─────────────────────────────────────────── */
+  header { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  header .logo { font-weight: 800; letter-spacing: 2.5px; font-size: 15px; }
+  header .logo span { color: var(--accent); }
+  .bar-chip { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; font-size: 12px; color: var(--dim); cursor: pointer; max-width: 340px; overflow: hidden; white-space: nowrap; }
+  .bar-chip:hover { border-color: var(--accent); color: var(--text); }
+  .bar-chip .path { overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
+  select, .bar-btn { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; font-size: 12px; cursor: pointer; font-family: var(--sans); }
+  select:hover, .bar-btn:hover { border-color: var(--accent); }
+  .spacer { flex: 1; }
+  .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
+  .mode-toggle button { background: var(--bg); color: var(--dim); border: 0; padding: 5px 12px; font-size: 12px; cursor: pointer; }
+  .mode-toggle button.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+
+  /* ── chat area ────────────────────────────────────────── */
+  #thread { flex: 1; overflow-y: auto; padding: 22px 0 12px; }
+  .inner { max-width: 860px; margin: 0 auto; padding: 0 20px; }
+  .msg { margin-bottom: 18px; display: flex; flex-direction: column; }
+  .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin-bottom: 5px; }
+  .msg.user .who { color: var(--info); }
+  .msg.assistant .who { color: var(--accent); }
+  .bubble { border-radius: var(--radius); padding: 11px 15px; line-height: 1.6; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .msg.user .bubble { background: #182030; border: 1px solid #223049; align-self: stretch; }
+  .msg.assistant .bubble { background: var(--panel); border: 1px solid var(--border); }
+  .msg.error .bubble { border-color: var(--err); color: #ffb4ae; }
+  .bubble pre { background: #0a0e13; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; margin: 8px 0; white-space: pre; }
+  .bubble code { font-family: var(--mono); font-size: 12.5px; background: #0a0e13; padding: 1px 5px; border-radius: 4px; }
+  .bubble pre code { background: none; padding: 0; }
+
+  .activity { font-family: var(--mono); font-size: 11.5px; color: var(--dim); margin: -8px 0 16px; }
+  .activity .row { display: flex; gap: 8px; align-items: baseline; padding: 2.5px 0; }
+  .activity .tool { color: var(--accent); min-width: 90px; }
+  .activity .ok { color: var(--ok); }
+  .activity .bad { color: var(--err); }
+  .activity .arg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 560px; }
+
+  #thinking { display: none; align-items: center; gap: 10px; color: var(--dim); font-size: 13px; margin-bottom: 16px; }
+  #thinking.on { display: flex; }
+  .pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: .25; transform: scale(.8);} 50% { opacity: 1; transform: scale(1);} }
+
+  /* ── welcome ─────────────────────────────────────────── */
+  #welcome { flex: 1; display: flex; align-items: center; justify-content: center; }
+  .welcome-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 34px 38px; width: 520px; }
+  .welcome-card h1 { font-size: 22px; letter-spacing: 2px; margin-bottom: 6px; }
+  .welcome-card h1 span { color: var(--accent); }
+  .welcome-card p { color: var(--dim); font-size: 13.5px; margin-bottom: 22px; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin-bottom: 6px; }
+  .folder-row { display: flex; gap: 8px; }
+  .folder-row input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 9px 11px; font-family: var(--mono); font-size: 12.5px; }
+  .folder-row button, .primary { background: var(--accent); border: 0; color: #131313; font-weight: 700; border-radius: 7px; padding: 9px 16px; cursor: pointer; font-size: 13px; }
+  .welcome-card select { width: 100%; padding: 9px 11px; font-size: 13px; }
+  .primary { width: 100%; padding: 11px; margin-top: 8px; font-size: 14px; }
+  .primary:disabled { opacity: .5; cursor: default; }
+  #welcome-err { color: var(--err); font-size: 12.5px; margin-top: 10px; min-height: 16px; }
+
+  /* ── composer ─────────────────────────────────────────── */
+  #composer { flex-shrink: 0; border-top: 1px solid var(--border); background: var(--panel); padding: 12px 0 14px; display: none; }
+  #composer.on { display: block; }
+  .composer-box { display: flex; gap: 10px; align-items: flex-end; }
+  #input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: var(--sans); font-size: 14px; padding: 11px 14px; resize: none; max-height: 180px; line-height: 1.5; }
+  #input:focus { outline: none; border-color: var(--accent); }
+  #send { background: var(--accent); border: 0; border-radius: var(--radius); color: #131313; font-weight: 800; padding: 11px 20px; cursor: pointer; font-size: 14px; }
+  #send:disabled { opacity: .4; cursor: default; }
+  .hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
+
+  /* ── modals ───────────────────────────────────────────── */
+  .overlay { position: fixed; inset: 0; background: rgba(5,8,12,.72); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .overlay.on { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; width: 560px; max-height: 80vh; display: flex; flex-direction: column; }
+  .modal h2 { font-size: 15px; margin-bottom: 12px; }
+  .modal .detail { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; word-break: break-all; max-height: 180px; overflow-y: auto; }
+  .modal .buttons { display: flex; gap: 10px; justify-content: flex-end; }
+  .modal .buttons button { border-radius: 7px; padding: 8px 16px; cursor: pointer; font-size: 13px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
+  .modal .buttons .deny { border-color: var(--err); color: var(--err); }
+  .modal .buttons .allow { background: var(--accent); border-color: var(--accent); color: #131313; font-weight: 700; }
+  .modal pre { font-family: var(--mono); font-size: 12px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .diff-add { color: #7ee2a8; } .diff-del { color: #ff9d94; } .diff-meta { color: var(--info); }
+</style>
+</head>
+<body>
+
+<header id="topbar" style="display:none">
+  <div class="logo">FORGE<span>▮</span></div>
+  <div class="bar-chip" id="folder-chip" title="Change folder"><span>📁</span><span class="path" id="folder-path"></span></div>
+  <select id="model-select" title="Switch model"></select>
+  <div class="mode-toggle" title="Permission mode">
+    <button id="mode-ask">Ask</button><button id="mode-auto">Auto</button>
+  </div>
+  <div class="spacer"></div>
+  <button class="bar-btn" onclick="showDiff()">Diff</button>
+  <button class="bar-btn" onclick="undoAll()">Undo all</button>
+  <button class="bar-btn" onclick="newSession()">New chat</button>
+</header>
+
+<div id="welcome">
+  <div class="welcome-card">
+    <h1>FORGE<span>▮</span></h1>
+    <p>Your local AI software engineer. Pick a folder to give Forge access — it can read, search, edit and build in that folder. Nothing leaves your machine.</p>
+    <div class="field">
+      <label>Project folder</label>
+      <div class="folder-row">
+        <input id="w-folder" placeholder="C:\path\to\your\project" spellcheck="false">
+        <button onclick="pickFolder('w-folder')">Browse…</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Model (installed in Ollama — switch anytime)</label>
+      <select id="w-model"></select>
+    </div>
+    <div class="field">
+      <label>Permissions</label>
+      <div class="mode-toggle" style="width:max-content">
+        <button id="w-ask" class="on" onclick="wMode='ask';syncW()">Ask before changes</button>
+        <button id="w-auto" onclick="wMode='auto';syncW()">Auto-approve</button>
+      </div>
+    </div>
+    <button class="primary" id="w-start" onclick="startSession()">Start working</button>
+    <div id="welcome-err"></div>
+  </div>
+</div>
+
+<div id="thread" style="display:none"><div class="inner" id="messages"></div></div>
+
+<div id="composer"><div class="inner">
+  <div class="composer-box">
+    <textarea id="input" rows="1" placeholder="Ask anything, or tell Forge what to build…  (@file to mention a file, /help for commands)"></textarea>
+    <button id="send" onclick="sendMessage()">Send</button>
+  </div>
+  <div class="hint">Enter to send · Shift+Enter for newline · /diff /undo /run /help</div>
+</div></div>
+
+<div class="overlay" id="approval-overlay">
+  <div class="modal">
+    <h2>⚠️ Forge wants to run <span id="ap-tool" style="color:var(--accent)"></span></h2>
+    <div class="detail" id="ap-detail"></div>
+    <div class="buttons">
+      <button class="deny" onclick="answerApproval(false,false)">Deny</button>
+      <button onclick="answerApproval(true,true)">Allow always</button>
+      <button class="allow" onclick="answerApproval(true,false)">Allow</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="diff-overlay" onclick="if(event.target===this)this.classList.remove('on')">
+  <div class="modal" style="width:820px">
+    <h2>Session changes <span id="diff-files" style="color:var(--dim);font-weight:400"></span></h2>
+    <pre id="diff-body"></pre>
+    <div class="buttons" style="margin-top:14px">
+      <button onclick="document.getElementById('diff-overlay').classList.remove('on')">Close</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (t) => (t ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let state = { active: false, status: "idle", mode: "ask", busyPoll: null, msgSeen: 0, evtSeen: 0 };
+let wMode = "ask";
+
+async function api(path, body) {
+  const opts = body ? { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) } : {};
+  const res = await fetch("/api" + path, opts);
+  if (!res.ok) throw new Error((await res.text()).slice(0, 300));
+  return res.json();
+}
+
+/* ── markdown-lite: code fences, inline code, bold ────────── */
+function md(text) {
+  const parts = text.split(/```(\w*)\n?/);
+  let html = "", inCode = false;
+  for (let i = 0; i < parts.length; i++) {
+    if (inCode) { html += `<pre><code>${esc(parts[i])}</code></pre>`; inCode = false; }
+    else if (i % 2 === 1) { inCode = true; }
+    else {
+      html += esc(parts[i])
+        .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+        .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+    }
+  }
+  return html;
+}
+
+/* ── folder picker: native via pywebview, else manual ─────── */
+async function pickFolder(inputId) {
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.pick_folder) {
+    const folder = await window.pywebview.api.pick_folder();
+    if (folder) $("#" + inputId).value = folder;
+  } else {
+    $("#" + inputId).focus();
+  }
+}
+
+function syncW() {
+  $("#w-ask").classList.toggle("on", wMode === "ask");
+  $("#w-auto").classList.toggle("on", wMode === "auto");
+}
+
+async function loadModels(selectId, chosen) {
+  const models = await api("/models");
+  const sel = $("#" + selectId);
+  sel.innerHTML = models.map(m => `<option ${m === chosen ? "selected" : ""}>${esc(m)}</option>`).join("")
+    || "<option>(no models — is Ollama running?)</option>";
+}
+
+/* ── session lifecycle ─────────────────────────────────────── */
+async function startSession() {
+  const folder = $("#w-folder").value.trim();
+  $("#welcome-err").textContent = "";
+  $("#w-start").disabled = true;
+  try {
+    const st = await api("/chat/start", { workspace: folder || null, model: $("#w-model").value, mode: wMode });
+    enterChat(st);
+  } catch (e) { $("#welcome-err").textContent = e.message; }
+  finally { $("#w-start").disabled = false; }
+}
+
+function enterChat(st) {
+  state.active = true; state.mode = st.mode; state.msgSeen = 0; state.evtSeen = 0;
+  $("#welcome").style.display = "none";
+  $("#topbar").style.display = "flex";
+  $("#thread").style.display = "block";
+  $("#composer").classList.add("on");
+  $("#messages").innerHTML = "";
+  $("#folder-path").textContent = st.workspace;
+  loadModels("model-select", st.model);
+  $("#mode-ask").classList.toggle("on", st.mode === "ask");
+  $("#mode-auto").classList.toggle("on", st.mode === "auto");
+  $("#input").focus();
+  poll();
+}
+
+function newSession() {
+  state.active = false;
+  clearTimeout(state.busyPoll);
+  $("#topbar").style.display = "none";
+  $("#thread").style.display = "none";
+  $("#composer").classList.remove("on");
+  $("#welcome").style.display = "flex";
+}
+
+/* ── messaging ─────────────────────────────────────────────── */
+async function sendMessage() {
+  const text = $("#input").value.trim();
+  if (!text || state.status === "working") return;
+  $("#input").value = ""; autosize();
+  try { await api("/chat/message", { text }); } catch (e) { addBubble("assistant", e.message, "error"); }
+  poll(true);
+}
+
+function addBubble(role, text, kind) {
+  const div = document.createElement("div");
+  div.className = `msg ${role} ${kind || ""}`;
+  const who = role === "user" ? "You" : "Forge";
+  div.innerHTML = `<div class="who">${who}</div><div class="bubble">${md(text)}</div>`;
+  $("#messages").appendChild(div);
+}
+
+function addActivity(events) {
+  let box = $("#messages").lastElementChild;
+  if (!box || !box.classList.contains("activity")) {
+    box = document.createElement("div");
+    box.className = "activity inner-act";
+    $("#messages").appendChild(box);
+  }
+  for (const e of events) {
+    if (e.kind === "tool_call") {
+      const arg = esc(JSON.stringify(e.arguments || {})).slice(0, 130);
+      box.insertAdjacentHTML("beforeend", `<div class="row"><span class="tool">⚒ ${esc(e.tool)}</span><span class="arg">${arg}</span></div>`);
+    } else if (e.kind === "tool_result" && e.ok === false) {
+      box.insertAdjacentHTML("beforeend", `<div class="row"><span class="bad">✗</span><span class="arg bad">${esc((e.error || "error").slice(0, 130))}</span></div>`);
+    } else if (e.kind === "tool_result") {
+      const last = box.querySelector(".row:last-child .tool");
+      if (last) last.insertAdjacentHTML("beforeend", ` <span class="ok">✓</span>`);
+    }
+  }
+}
+
+/* ── polling loop ──────────────────────────────────────────── */
+async function poll(fast) {
+  if (!state.active) return;
+  clearTimeout(state.busyPoll);
+  try {
+    const st = await api(`/chat/updates?events_after=${state.evtSeen}&messages_after=${state.msgSeen}`);
+    state.status = st.status;
+    const toolEvents = st.events.filter(e => e.kind === "tool_call" || e.kind === "tool_result");
+    if (toolEvents.length) addActivity(toolEvents);
+    state.evtSeen = st.event_count;
+    for (const m of st.messages) addBubble(m.role, m.text, m.kind);
+    state.msgSeen = st.message_count;
+    if (st.messages.length || toolEvents.length) {
+      $("#thread").scrollTop = $("#thread").scrollHeight;
+    }
+    $("#send").disabled = st.status === "working";
+    setThinking(st.status === "working");
+    if (st.pending_approval) showApproval(st.pending_approval);
+    else $("#approval-overlay").classList.remove("on");
+  } catch (e) { /* server briefly busy — keep polling */ }
+  const delay = state.status === "working" || fast ? 650 : 2500;
+  state.busyPoll = setTimeout(poll, delay);
+}
+
+function setThinking(on) {
+  let el = $("#thinking");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "thinking";
+    el.innerHTML = `<div class="pulse"></div><span>Forge is working…</span>`;
+    $("#thread").appendChild(el);
+  }
+  el.classList.toggle("on", on);
+  if (on) $("#thread").appendChild(el);
+}
+
+/* ── approvals ─────────────────────────────────────────────── */
+function showApproval(pending) {
+  $("#ap-tool").textContent = pending.tool;
+  $("#ap-detail").textContent = pending.detail;
+  $("#approval-overlay").classList.add("on");
+}
+async function answerApproval(approved, always) {
+  $("#approval-overlay").classList.remove("on");
+  try { await api("/chat/approval", { approved, always }); } catch (e) {}
+  poll(true);
+}
+
+/* ── top bar actions ───────────────────────────────────────── */
+$("#folder-chip").onclick = () => newSession();
+$("#model-select").onchange = async () => {
+  try { await api("/chat/model", { model: $("#model-select").value }); } catch (e) {}
+};
+async function showDiff() {
+  const d = await api("/chat/diff");
+  const st = await api("/chat/updates");
+  $("#diff-files").textContent = st.changed_files.length ? "· " + st.changed_files.join(", ") : "";
+  $("#diff-body").innerHTML = (d.diff || "No changes in this session yet.")
+    .split("\n").map(l => {
+      let cls = l.startsWith("+++") || l.startsWith("---") || l.startsWith("@@") ? "diff-meta"
+        : l.startsWith("+") ? "diff-add" : l.startsWith("-") ? "diff-del" : "";
+      return `<span class="${cls}">${esc(l)}</span>`;
+    }).join("\n");
+  $("#diff-overlay").classList.add("on");
+}
+async function undoAll() {
+  if (!confirm("Revert every file change made in this session?")) return;
+  const r = await api("/chat/undo", {});
+  addBubble("assistant", r.restored.length ? "Reverted: " + r.restored.join(", ") : "Nothing to undo.", "command");
+  poll(true);
+}
+
+/* ── composer ergonomics ───────────────────────────────────── */
+const input = $("#input");
+function autosize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 180) + "px"; }
+input.addEventListener("input", autosize);
+input.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+/* ── boot ──────────────────────────────────────────────────── */
+(async () => {
+  await loadModels("w-model");
+  try {
+    const h = await api("/health");
+    if (!$("#w-folder").value) $("#w-folder").value = h.workspace;
+  } catch (e) {}
+})();
+</script>
+</body>
+</html>
