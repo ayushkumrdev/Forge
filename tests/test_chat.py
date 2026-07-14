@@ -66,6 +66,23 @@ def test_inline_json_tool_calls_recovered_in_chat(workspace):
     assert (workspace / "x.txt").read_text(encoding="utf-8") == "inline"
 
 
+def test_should_stop_short_circuits_before_any_llm_call(workspace):
+    llm = MockLLMClient([ChatMessage(role="assistant", content="never reached")])
+    session = _session(workspace, llm)
+    session.should_stop = lambda: True
+    assert session.send("do something") == "Stopped by user."
+    assert llm.requests == []
+
+
+def test_on_stream_receives_final_text(workspace):
+    llm = MockLLMClient([ChatMessage(role="assistant", content="streamed reply")])
+    session = _session(workspace, llm)
+    deltas: list[str] = []
+    session.on_stream = deltas.append
+    session.send("hi")
+    assert "".join(deltas) == "streamed reply"
+
+
 def test_template_token_leak_gets_one_nudge(workspace):
     llm = MockLLMClient(
         [

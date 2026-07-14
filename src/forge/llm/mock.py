@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from forge.llm.base import ChatMessage, LLMClient, LLMError, LLMResponse, ToolSpec
+from forge.llm.base import (
+    ChatMessage,
+    LLMClient,
+    LLMError,
+    LLMResponse,
+    TokenCallback,
+    ToolSpec,
+)
 
 
 class MockLLMClient(LLMClient):
@@ -17,8 +24,12 @@ class MockLLMClient(LLMClient):
         messages: list[ChatMessage],
         tools: list[ToolSpec] | None = None,
         temperature: float | None = None,
+        on_token: TokenCallback | None = None,
     ) -> LLMResponse:
         self.requests.append(list(messages))
         if not self._responses:
             raise LLMError("MockLLMClient ran out of scripted responses")
-        return LLMResponse(message=self._responses.pop(0))
+        message = self._responses.pop(0)
+        if on_token is not None and message.content and not message.tool_calls:
+            on_token(message.content)
+        return LLMResponse(message=message)

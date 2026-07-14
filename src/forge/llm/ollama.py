@@ -1,7 +1,9 @@
-"""Ollama chat client with native tool-calling (supported by qwen2.5-coder)."""
+"""Ollama chat client with native tool-calling (supported by qwen2.5-coder)
+and NDJSON token streaming."""
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import httpx
@@ -11,6 +13,7 @@ from forge.llm.base import (
     LLMClient,
     LLMError,
     LLMResponse,
+    TokenCallback,
     ToolCall,
     ToolSpec,
     Usage,
@@ -37,11 +40,12 @@ class OllamaClient(LLMClient):
         messages: list[ChatMessage],
         tools: list[ToolSpec] | None = None,
         temperature: float | None = None,
+        on_token: TokenCallback | None = None,
     ) -> LLMResponse:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [self._to_wire(m) for m in messages],
-            "stream": False,
+            "stream": on_token is not None,
             "options": {
                 "temperature": self.temperature if temperature is None else temperature,
                 "num_ctx": self.num_ctx,
@@ -51,6 +55,8 @@ class OllamaClient(LLMClient):
             payload["tools"] = [t.to_wire() for t in tools]
 
         try:
+            if on_token is not None:
+                return self._chat_streaming(payload, on_token)
             response = self._client.post("/api/chat", json=payload)
             response.raise_for_status()
         except httpx.ConnectError as exc:
@@ -66,6 +72,44 @@ class OllamaClient(LLMClient):
 
         data = response.json()
         return self._parse(data)
+
+    def _chat_streaming(self, payload: dict[str, Any], on_token: TokenCallback) -> LLMResponse:
+        content_parts: list[str] = []
+        tool_calls: list[ToolCall] = []
+        final: dict[str, Any] = {}
+        with self._client.stream("POST", "/api/chat", json=payload) as response:
+            response.raise_for_status()
+            for line in response.iter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                message = chunk.get("message") or {}
+                delta = message.get("content") or ""
+                if delta:
+                    content_parts.append(delta)
+                    on_token(delta)
+                for tc in message.get("tool_calls") or []:
+                    tool_calls.append(
+                        ToolCall(
+                            name=tc["function"]["name"],
+                            arguments=tc["function"].get("arguments") or {},
+                        )
+                    )
+                if chunk.get("done"):
+                    final = chunk
+        return LLMResponse(
+            message=ChatMessage(
+                role="assistant", content="".join(content_parts), tool_calls=tool_calls
+            ),
+            usage=Usage(
+                prompt_tokens=final.get("prompt_eval_count") or 0,
+                completion_tokens=final.get("eval_count") or 0,
+                duration_ms=(final.get("total_duration") or 0) / 1_000_000,
+            ),
+        )
 
     def ping(self) -> bool:
         try:

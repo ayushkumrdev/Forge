@@ -58,7 +58,16 @@ behind an existing interface.
 - Live tool-activity feed, diff viewer, one-click undo of session changes
 - `forge shortcut` installs a desktop shortcut
 
-## Milestone 8 — Execution isolation & scale
+## ✅ Milestone 8 — App level-up
+- Token streaming: replies render live as the model generates (NDJSON stream)
+- Stop button (soft cancel between steps) and message queueing while busy
+- Multiple conversations with a sidebar, titles, and instant switching
+- Recent-folders memory on the welcome screen; session re-attach on reload
+- Claude-grade UI: forge-themed dark design, expandable tool cards with
+  arguments/results, code blocks with copy + syntax highlighting, live
+  elapsed-time working indicator, token usage footer
+
+## Milestone 9 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics

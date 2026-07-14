@@ -6,155 +6,276 @@
 <title>Forge</title>
 <style>
   :root {
-    --bg: #0d1117; --panel: #161b22; --panel2: #1d232c; --border: #2b3138;
-    --text: #e6edf3; --dim: #8b949e; --accent: #e8833a; --accent-soft: #3a2718;
-    --ok: #3fb950; --err: #f85149; --warn: #d29922; --info: #58a6ff;
-    --mono: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
-    --sans: "Segoe UI", system-ui, sans-serif;
-    --radius: 10px;
+    --coal-0: #0a0c10; --coal-1: #0f1319; --coal-2: #141a22; --coal-3: #1b222c;
+    --line: #232b36; --line-soft: #1c232d;
+    --ink: #e9e5de; --ink-dim: #98a1ad; --ink-faint: #5c6673;
+    --ember: #ff7a1a; --ember-hi: #ffb066; --ember-deep: #c85a0e;
+    --ember-soft: rgba(255,122,26,.12); --ember-line: rgba(255,122,26,.35);
+    --ok: #4ade80; --err: #ff6b61; --warn: #fbbf24; --info: #6cb6ff;
+    --mono: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
+    --body: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --r: 12px; --r-sm: 8px;
   }
   * { box-sizing: border-box; margin: 0; }
   html, body { height: 100%; }
-  body { background: var(--bg); color: var(--text); font-family: var(--sans); display: flex; flex-direction: column; overflow: hidden; }
+  body {
+    background: var(--coal-0); color: var(--ink); font-family: var(--body);
+    display: flex; overflow: hidden; font-size: 14px;
+  }
+  body::after { /* grain */
+    content: ""; position: fixed; inset: 0; pointer-events: none; opacity: .035; z-index: 999;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+  ::-webkit-scrollbar { width: 9px; height: 9px; }
+  ::-webkit-scrollbar-thumb { background: var(--line); border-radius: 9px; border: 2px solid var(--coal-0); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); }
+  ::-webkit-scrollbar-track { background: transparent; }
 
-  /* ── top bar ─────────────────────────────────────────── */
-  header { display: flex; align-items: center; gap: 10px; padding: 9px 14px; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-  header .logo { font-weight: 800; letter-spacing: 2.5px; font-size: 15px; }
-  header .logo span { color: var(--accent); }
-  .bar-chip { display: flex; align-items: center; gap: 6px; background: var(--bg); border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; font-size: 12px; color: var(--dim); cursor: pointer; max-width: 340px; overflow: hidden; white-space: nowrap; }
-  .bar-chip:hover { border-color: var(--accent); color: var(--text); }
-  .bar-chip .path { overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); }
-  select, .bar-btn { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 7px; padding: 5px 10px; font-size: 12px; cursor: pointer; font-family: var(--sans); }
-  select:hover, .bar-btn:hover { border-color: var(--accent); }
+  /* ═══ sidebar ═══════════════════════════════════════════ */
+  aside {
+    width: 248px; flex-shrink: 0; background: var(--coal-1); border-right: 1px solid var(--line-soft);
+    display: none; flex-direction: column; padding: 14px 12px 12px;
+  }
+  aside.on { display: flex; }
+  .wordmark { font-family: var(--mono); font-weight: 700; font-size: 15px; letter-spacing: 3px; padding: 2px 6px 14px; }
+  .wordmark b { color: var(--ember); animation: emberblink 3s ease-in-out infinite; }
+  @keyframes emberblink { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
+  #new-chat {
+    display: flex; align-items: center; gap: 8px; justify-content: center;
+    background: linear-gradient(135deg, var(--ember-deep), var(--ember)); color: #14100c;
+    border: 0; border-radius: var(--r-sm); padding: 9px; font-weight: 700; font-size: 13px;
+    font-family: var(--body); cursor: pointer; transition: filter .15s, transform .1s;
+  }
+  #new-chat:hover { filter: brightness(1.12); }
+  #new-chat:active { transform: scale(.98); }
+  #convos { flex: 1; overflow-y: auto; margin-top: 14px; display: flex; flex-direction: column; gap: 2px; }
+  .convo {
+    padding: 8px 10px; border-radius: var(--r-sm); cursor: pointer; border: 1px solid transparent;
+    font-size: 12.5px; color: var(--ink-dim); transition: background .12s;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .convo:hover { background: var(--coal-2); color: var(--ink); }
+  .convo.active { background: var(--ember-soft); border-color: var(--ember-line); color: var(--ink); }
+  .convo .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ember); margin-right: 7px; animation: emberblink 1.2s infinite; vertical-align: 1px; }
+  .side-foot { border-top: 1px solid var(--line-soft); padding-top: 10px; margin-top: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); line-height: 1.8; }
+  .side-foot b { color: var(--ink-dim); font-weight: 600; }
+
+  /* ═══ main column ═══════════════════════════════════════ */
+  main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  header {
+    display: none; align-items: center; gap: 8px; padding: 10px 16px;
+    border-bottom: 1px solid var(--line-soft); background: var(--coal-1); flex-shrink: 0;
+  }
+  header.on { display: flex; }
+  .chip {
+    display: flex; align-items: center; gap: 7px; background: var(--coal-2); border: 1px solid var(--line);
+    border-radius: 7px; padding: 5px 11px; font-size: 12px; color: var(--ink-dim); cursor: pointer;
+    max-width: 320px; white-space: nowrap; transition: border-color .15s, color .15s;
+    font-family: var(--mono);
+  }
+  .chip:hover { border-color: var(--ember-line); color: var(--ink); }
+  .chip .path { overflow: hidden; text-overflow: ellipsis; direction: rtl; text-align: left; }
+  select.chip { appearance: none; cursor: pointer; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button { background: var(--coal-2); color: var(--ink-faint); border: 0; padding: 5px 12px; font-size: 11.5px; cursor: pointer; font-family: var(--mono); letter-spacing: .5px; }
+  .seg button.on { background: var(--ember-soft); color: var(--ember-hi); }
   .spacer { flex: 1; }
-  .mode-toggle { display: flex; border: 1px solid var(--border); border-radius: 7px; overflow: hidden; }
-  .mode-toggle button { background: var(--bg); color: var(--dim); border: 0; padding: 5px 12px; font-size: 12px; cursor: pointer; }
-  .mode-toggle button.on { background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+  .ghost { background: none; border: 1px solid var(--line); color: var(--ink-dim); border-radius: 7px; padding: 5px 12px; font-size: 12px; cursor: pointer; font-family: var(--body); transition: all .15s; }
+  .ghost:hover { border-color: var(--ember-line); color: var(--ink); }
 
-  /* ── chat area ────────────────────────────────────────── */
-  #thread { flex: 1; overflow-y: auto; padding: 22px 0 12px; }
-  .inner { max-width: 860px; margin: 0 auto; padding: 0 20px; }
-  .msg { margin-bottom: 18px; display: flex; flex-direction: column; }
-  .msg .who { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin-bottom: 5px; }
-  .msg.user .who { color: var(--info); }
-  .msg.assistant .who { color: var(--accent); }
-  .bubble { border-radius: var(--radius); padding: 11px 15px; line-height: 1.6; font-size: 14px; white-space: pre-wrap; word-break: break-word; }
-  .msg.user .bubble { background: #182030; border: 1px solid #223049; align-self: stretch; }
-  .msg.assistant .bubble { background: var(--panel); border: 1px solid var(--border); }
-  .msg.error .bubble { border-color: var(--err); color: #ffb4ae; }
-  .bubble pre { background: #0a0e13; border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; margin: 8px 0; white-space: pre; }
-  .bubble code { font-family: var(--mono); font-size: 12.5px; background: #0a0e13; padding: 1px 5px; border-radius: 4px; }
-  .bubble pre code { background: none; padding: 0; }
+  /* ═══ welcome ═══════════════════════════════════════════ */
+  #welcome { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; }
+  #welcome::before {
+    content: ""; position: absolute; width: 900px; height: 900px; border-radius: 50%;
+    background: radial-gradient(circle, rgba(255,122,26,.09) 0%, transparent 62%);
+    top: -300px; left: 50%; transform: translateX(-50%); pointer-events: none;
+  }
+  .hero { width: 560px; position: relative; animation: rise .5s ease both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
+  .hero-mark { font-family: var(--mono); font-size: 44px; font-weight: 700; letter-spacing: 10px; margin-bottom: 4px; }
+  .hero-mark b { color: var(--ember); text-shadow: 0 0 24px rgba(255,122,26,.6); }
+  .hero-sub { color: var(--ink-dim); font-size: 14px; margin-bottom: 30px; }
+  .hero-sub em { color: var(--ember-hi); font-style: normal; }
+  .panel { background: var(--coal-1); border: 1px solid var(--line); border-radius: var(--r); padding: 22px; }
+  .lbl { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 1.6px; text-transform: uppercase; color: var(--ink-faint); margin: 0 0 7px 2px; }
+  .row { display: flex; gap: 8px; margin-bottom: 16px; }
+  .row input {
+    flex: 1; background: var(--coal-0); border: 1px solid var(--line); border-radius: var(--r-sm);
+    color: var(--ink); padding: 10px 12px; font-family: var(--mono); font-size: 12.5px; outline: none;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .row input:focus { border-color: var(--ember-line); box-shadow: 0 0 0 3px rgba(255,122,26,.08); }
+  .btn {
+    background: var(--coal-2); border: 1px solid var(--line); color: var(--ink); border-radius: var(--r-sm);
+    padding: 10px 16px; cursor: pointer; font-size: 13px; font-family: var(--body); transition: border-color .15s;
+  }
+  .btn:hover { border-color: var(--ember-line); }
+  #recent { display: flex; flex-wrap: wrap; gap: 6px; margin: -8px 0 16px; }
+  #recent .chip { max-width: 100%; }
+  .hero select { width: 100%; background: var(--coal-0); border: 1px solid var(--line); color: var(--ink); border-radius: var(--r-sm); padding: 10px 12px; font-family: var(--mono); font-size: 12.5px; margin-bottom: 16px; outline: none; }
+  .go {
+    width: 100%; padding: 12px; border: 0; border-radius: var(--r-sm); cursor: pointer;
+    background: linear-gradient(135deg, var(--ember-deep), var(--ember)); color: #14100c;
+    font-weight: 800; font-size: 14px; letter-spacing: .3px; font-family: var(--body);
+    box-shadow: 0 6px 24px -8px rgba(255,122,26,.5); transition: filter .15s, transform .1s;
+  }
+  .go:hover { filter: brightness(1.1); }
+  .go:active { transform: scale(.99); }
+  .go:disabled { opacity: .5; }
+  #w-err { color: var(--err); font-size: 12.5px; margin-top: 10px; min-height: 17px; font-family: var(--mono); }
 
-  .activity { font-family: var(--mono); font-size: 11.5px; color: var(--dim); margin: -8px 0 16px; }
-  .activity .row { display: flex; gap: 8px; align-items: baseline; padding: 2.5px 0; }
-  .activity .tool { color: var(--accent); min-width: 90px; }
-  .activity .ok { color: var(--ok); }
-  .activity .bad { color: var(--err); }
-  .activity .arg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 560px; }
+  /* ═══ thread ════════════════════════════════════════════ */
+  #thread { flex: 1; overflow-y: auto; display: none; scroll-behavior: smooth; }
+  #thread.on { display: block; }
+  .lane { max-width: 780px; margin: 0 auto; padding: 26px 24px 10px; }
+  .m { margin-bottom: 22px; animation: rise .25s ease both; }
+  .m-user { display: flex; justify-content: flex-end; }
+  .m-user .bub {
+    background: var(--coal-3); border: 1px solid var(--line); border-radius: 14px 14px 4px 14px;
+    padding: 10px 15px; max-width: 82%; line-height: 1.55; white-space: pre-wrap; word-break: break-word;
+  }
+  .m-forge .tag { font-family: var(--mono); font-size: 11px; color: var(--ember); letter-spacing: 1px; margin-bottom: 7px; }
+  .m-forge .body { line-height: 1.65; word-break: break-word; }
+  .m-forge .body p { margin: 0 0 10px; }
+  .m-forge.err .body { color: #ffb4ae; border-left: 2px solid var(--err); padding-left: 12px; }
+  .m-forge.cmd .body { font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; background: var(--coal-1); border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 12px 14px; }
+  .cursor { display: inline-block; width: 7px; height: 15px; background: var(--ember); vertical-align: -2px; margin-left: 2px; animation: emberblink .8s infinite; border-radius: 1px; }
 
-  #thinking { display: none; align-items: center; gap: 10px; color: var(--dim); font-size: 13px; margin-bottom: 16px; }
-  #thinking.on { display: flex; }
-  .pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: pulse 1.1s ease-in-out infinite; }
-  @keyframes pulse { 0%,100% { opacity: .25; transform: scale(.8);} 50% { opacity: 1; transform: scale(1);} }
+  /* code blocks */
+  .code { background: #080a0e; border: 1px solid var(--line-soft); border-radius: var(--r-sm); margin: 10px 0; overflow: hidden; }
+  .code-bar { display: flex; align-items: center; justify-content: space-between; padding: 5px 12px; background: var(--coal-1); border-bottom: 1px solid var(--line-soft); font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); letter-spacing: 1px; }
+  .code-bar button { background: none; border: 0; color: var(--ink-faint); cursor: pointer; font-family: var(--mono); font-size: 10.5px; letter-spacing: 1px; }
+  .code-bar button:hover { color: var(--ember-hi); }
+  .code pre { padding: 12px 14px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.6; }
+  .body code:not(pre code) { font-family: var(--mono); font-size: 12.5px; background: var(--coal-2); border: 1px solid var(--line-soft); padding: 1px 6px; border-radius: 5px; color: var(--ember-hi); }
+  .k { color: #ff8f4d; } .s { color: #a8d78a; } .c { color: #5c6673; font-style: italic; } .n { color: #6cb6ff; }
 
-  /* ── welcome ─────────────────────────────────────────── */
-  #welcome { flex: 1; display: flex; align-items: center; justify-content: center; }
-  .welcome-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 34px 38px; width: 520px; }
-  .welcome-card h1 { font-size: 22px; letter-spacing: 2px; margin-bottom: 6px; }
-  .welcome-card h1 span { color: var(--accent); }
-  .welcome-card p { color: var(--dim); font-size: 13.5px; margin-bottom: 22px; }
-  .field { margin-bottom: 14px; }
-  .field label { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim); margin-bottom: 6px; }
-  .folder-row { display: flex; gap: 8px; }
-  .folder-row input { flex: 1; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 9px 11px; font-family: var(--mono); font-size: 12.5px; }
-  .folder-row button, .primary { background: var(--accent); border: 0; color: #131313; font-weight: 700; border-radius: 7px; padding: 9px 16px; cursor: pointer; font-size: 13px; }
-  .welcome-card select { width: 100%; padding: 9px 11px; font-size: 13px; }
-  .primary { width: 100%; padding: 11px; margin-top: 8px; font-size: 14px; }
-  .primary:disabled { opacity: .5; cursor: default; }
-  #welcome-err { color: var(--err); font-size: 12.5px; margin-top: 10px; min-height: 16px; }
+  /* tool cards */
+  .tools { margin: -10px 0 20px; display: flex; flex-direction: column; gap: 4px; }
+  .tcard { border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--coal-1); overflow: hidden; animation: rise .2s ease both; }
+  .tcard summary {
+    list-style: none; display: flex; align-items: center; gap: 9px; padding: 7px 12px; cursor: pointer;
+    font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); user-select: none;
+  }
+  .tcard summary::-webkit-details-marker { display: none; }
+  .tcard summary:hover { background: var(--coal-2); }
+  .tcard .glyph { color: var(--ember); width: 14px; text-align: center; }
+  .tcard .tname { color: var(--ink); font-weight: 600; }
+  .tcard .targ { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-faint); }
+  .tcard .st-ok { color: var(--ok); } .tcard .st-err { color: var(--err); }
+  .tcard .tbody { border-top: 1px solid var(--line-soft); padding: 10px 12px; font-family: var(--mono); font-size: 11.5px; color: var(--ink-dim); white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow-y: auto; background: #0b0e13; }
+  .tbody .sect { color: var(--ink-faint); letter-spacing: 1px; text-transform: uppercase; font-size: 9.5px; margin: 6px 0 3px; }
 
-  /* ── composer ─────────────────────────────────────────── */
-  #composer { flex-shrink: 0; border-top: 1px solid var(--border); background: var(--panel); padding: 12px 0 14px; display: none; }
+  /* working indicator */
+  #working { display: none; align-items: center; gap: 11px; padding: 4px 0 22px; font-family: var(--mono); font-size: 12px; color: var(--ink-dim); }
+  #working.on { display: flex; }
+  .flame { width: 12px; height: 12px; border-radius: 50% 50% 50% 2px; background: linear-gradient(135deg, var(--ember-hi), var(--ember-deep)); animation: flick 1s ease-in-out infinite; box-shadow: 0 0 14px rgba(255,122,26,.7); }
+  @keyframes flick { 0%,100% { transform: rotate(-45deg) scale(1);} 50% { transform: rotate(-45deg) scale(.78); } }
+  #queued-note { color: var(--warn); }
+
+  /* ═══ composer ══════════════════════════════════════════ */
+  #composer { display: none; flex-shrink: 0; padding: 10px 24px 18px; }
   #composer.on { display: block; }
-  .composer-box { display: flex; gap: 10px; align-items: flex-end; }
-  #input { flex: 1; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); font-family: var(--sans); font-size: 14px; padding: 11px 14px; resize: none; max-height: 180px; line-height: 1.5; }
-  #input:focus { outline: none; border-color: var(--accent); }
-  #send { background: var(--accent); border: 0; border-radius: var(--radius); color: #131313; font-weight: 800; padding: 11px 20px; cursor: pointer; font-size: 14px; }
-  #send:disabled { opacity: .4; cursor: default; }
-  .hint { font-size: 11px; color: var(--dim); margin-top: 6px; }
+  .comp-shell { max-width: 780px; margin: 0 auto; }
+  .comp-box {
+    display: flex; align-items: flex-end; gap: 10px; background: var(--coal-1);
+    border: 1px solid var(--line); border-radius: 14px; padding: 10px 10px 10px 16px;
+    transition: border-color .15s, box-shadow .2s;
+  }
+  .comp-box:focus-within { border-color: var(--ember-line); box-shadow: 0 0 0 4px rgba(255,122,26,.07), 0 10px 40px -18px rgba(255,122,26,.35); }
+  #input { flex: 1; background: none; border: 0; outline: none; color: var(--ink); font-family: var(--body); font-size: 14px; resize: none; max-height: 190px; line-height: 1.55; padding: 4px 0; }
+  #send, #stop {
+    border: 0; border-radius: 9px; padding: 9px 18px; font-weight: 800; font-size: 13px; cursor: pointer;
+    font-family: var(--body); transition: filter .15s;
+  }
+  #send { background: linear-gradient(135deg, var(--ember-deep), var(--ember)); color: #14100c; }
+  #send:hover { filter: brightness(1.12); }
+  #send:disabled { opacity: .35; cursor: default; filter: none; }
+  #stop { display: none; background: none; border: 1px solid var(--err); color: var(--err); }
+  #stop.on { display: block; }
+  .comp-hint { font-family: var(--mono); font-size: 10.5px; color: var(--ink-faint); margin: 7px 4px 0; display: flex; gap: 16px; }
 
-  /* ── modals ───────────────────────────────────────────── */
-  .overlay { position: fixed; inset: 0; background: rgba(5,8,12,.72); display: none; align-items: center; justify-content: center; z-index: 50; }
-  .overlay.on { display: flex; }
-  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; width: 560px; max-height: 80vh; display: flex; flex-direction: column; }
-  .modal h2 { font-size: 15px; margin-bottom: 12px; }
-  .modal .detail { font-family: var(--mono); font-size: 12px; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; word-break: break-all; max-height: 180px; overflow-y: auto; }
-  .modal .buttons { display: flex; gap: 10px; justify-content: flex-end; }
-  .modal .buttons button { border-radius: 7px; padding: 8px 16px; cursor: pointer; font-size: 13px; border: 1px solid var(--border); background: var(--bg); color: var(--text); }
-  .modal .buttons .deny { border-color: var(--err); color: var(--err); }
-  .modal .buttons .allow { background: var(--accent); border-color: var(--accent); color: #131313; font-weight: 700; }
-  .modal pre { font-family: var(--mono); font-size: 12px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
-  .diff-add { color: #7ee2a8; } .diff-del { color: #ff9d94; } .diff-meta { color: var(--info); }
+  /* ═══ modals ════════════════════════════════════════════ */
+  .veil { position: fixed; inset: 0; background: rgba(4,6,9,.75); backdrop-filter: blur(3px); display: none; align-items: center; justify-content: center; z-index: 100; }
+  .veil.on { display: flex; }
+  .modal { background: var(--coal-1); border: 1px solid var(--line); border-radius: var(--r); padding: 22px 24px; width: 580px; max-height: 82vh; display: flex; flex-direction: column; animation: pop .18s ease both; box-shadow: 0 30px 90px -30px rgba(0,0,0,.9); }
+  @keyframes pop { from { opacity: 0; transform: scale(.96); } }
+  .modal.warn { border-top: 2px solid var(--warn); }
+  .modal h2 { font-size: 14.5px; margin-bottom: 13px; font-weight: 650; }
+  .modal h2 .tool-name { font-family: var(--mono); color: var(--ember-hi); }
+  .modal .det { font-family: var(--mono); font-size: 11.5px; background: var(--coal-0); border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 11px 13px; margin-bottom: 18px; word-break: break-all; max-height: 200px; overflow-y: auto; color: var(--ink-dim); }
+  .modal .acts { display: flex; gap: 9px; justify-content: flex-end; }
+  .modal .acts button { border-radius: 8px; padding: 8px 16px; cursor: pointer; font-size: 12.5px; font-family: var(--body); background: var(--coal-2); border: 1px solid var(--line); color: var(--ink); }
+  .modal .acts .deny { border-color: rgba(255,107,97,.5); color: var(--err); }
+  .modal .acts .allow { background: linear-gradient(135deg, var(--ember-deep), var(--ember)); border: 0; color: #14100c; font-weight: 700; }
+  .modal pre { font-family: var(--mono); font-size: 11.5px; overflow: auto; background: var(--coal-0); border: 1px solid var(--line-soft); border-radius: var(--r-sm); padding: 12px; line-height: 1.6; }
+  .da { color: #7ee2a8; } .dd { color: #ff9d94; } .dm { color: var(--info); }
 </style>
 </head>
 <body>
 
-<header id="topbar" style="display:none">
-  <div class="logo">FORGE<span>▮</span></div>
-  <div class="bar-chip" id="folder-chip" title="Change folder"><span>📁</span><span class="path" id="folder-path"></span></div>
-  <select id="model-select" title="Switch model"></select>
-  <div class="mode-toggle" title="Permission mode">
-    <button id="mode-ask">Ask</button><button id="mode-auto">Auto</button>
+<aside id="sidebar">
+  <div class="wordmark">FORGE<b>▮</b></div>
+  <button id="new-chat" onclick="newChat()">＋&nbsp; New chat</button>
+  <div id="convos"></div>
+  <div class="side-foot">
+    <div><b id="u-model">–</b></div>
+    <div>tokens <b id="u-in">0</b> in · <b id="u-out">0</b> out</div>
+    <div id="u-changed"></div>
   </div>
-  <div class="spacer"></div>
-  <button class="bar-btn" onclick="showDiff()">Diff</button>
-  <button class="bar-btn" onclick="undoAll()">Undo all</button>
-  <button class="bar-btn" onclick="newSession()">New chat</button>
-</header>
+</aside>
 
-<div id="welcome">
-  <div class="welcome-card">
-    <h1>FORGE<span>▮</span></h1>
-    <p>Your local AI software engineer. Pick a folder to give Forge access — it can read, search, edit and build in that folder. Nothing leaves your machine.</p>
-    <div class="field">
-      <label>Project folder</label>
-      <div class="folder-row">
-        <input id="w-folder" placeholder="C:\path\to\your\project" spellcheck="false">
-        <button onclick="pickFolder('w-folder')">Browse…</button>
+<main>
+  <header id="topbar">
+    <div class="chip" id="folder-chip" title="Change folder" onclick="goWelcome()">📁<span class="path" id="h-folder"></span></div>
+    <select class="chip" id="h-model" title="Switch model (applies immediately)"></select>
+    <div class="seg"><button id="h-ask">ASK</button><button id="h-auto">AUTO</button></div>
+    <div class="spacer"></div>
+    <button class="ghost" onclick="showDiff()">Diff</button>
+    <button class="ghost" onclick="undoAll()">Undo all</button>
+  </header>
+
+  <div id="welcome">
+    <div class="hero">
+      <div class="hero-mark">FORGE<b>▮</b></div>
+      <div class="hero-sub">Your local AI software engineer. Reads, edits and builds in the folder you choose. <em>Nothing ever leaves this machine.</em></div>
+      <div class="panel">
+        <label class="lbl">Project folder</label>
+        <div class="row">
+          <input id="w-folder" placeholder="C:\path\to\your\project" spellcheck="false">
+          <button class="btn" onclick="pickFolder()">Browse…</button>
+        </div>
+        <div id="recent"></div>
+        <label class="lbl">Model — switch anytime</label>
+        <select id="w-model"></select>
+        <label class="lbl">Permissions</label>
+        <div class="seg" style="width:max-content;margin-bottom:18px">
+          <button id="w-ask" class="on" onclick="setWMode('ask')">ASK BEFORE CHANGES</button>
+          <button id="w-auto" onclick="setWMode('auto')">AUTO-APPROVE</button>
+        </div>
+        <button class="go" id="w-go" onclick="startSession()">Start working →</button>
+        <div id="w-err"></div>
       </div>
     </div>
-    <div class="field">
-      <label>Model (installed in Ollama — switch anytime)</label>
-      <select id="w-model"></select>
-    </div>
-    <div class="field">
-      <label>Permissions</label>
-      <div class="mode-toggle" style="width:max-content">
-        <button id="w-ask" class="on" onclick="wMode='ask';syncW()">Ask before changes</button>
-        <button id="w-auto" onclick="wMode='auto';syncW()">Auto-approve</button>
-      </div>
-    </div>
-    <button class="primary" id="w-start" onclick="startSession()">Start working</button>
-    <div id="welcome-err"></div>
   </div>
-</div>
 
-<div id="thread" style="display:none"><div class="inner" id="messages"></div></div>
+  <div id="thread"><div class="lane" id="lane"></div></div>
 
-<div id="composer"><div class="inner">
-  <div class="composer-box">
-    <textarea id="input" rows="1" placeholder="Ask anything, or tell Forge what to build…  (@file to mention a file, /help for commands)"></textarea>
-    <button id="send" onclick="sendMessage()">Send</button>
-  </div>
-  <div class="hint">Enter to send · Shift+Enter for newline · /diff /undo /run /help</div>
-</div></div>
+  <div id="composer"><div class="comp-shell">
+    <div class="comp-box">
+      <textarea id="input" rows="1" placeholder="Ask anything, or tell Forge what to build…"></textarea>
+      <button id="stop" onclick="stopTurn()">Stop</button>
+      <button id="send" onclick="sendMessage()">Send</button>
+    </div>
+    <div class="comp-hint"><span>enter send · shift+enter newline</span><span>@file mentions</span><span>/diff /undo /run /help</span></div>
+  </div></div>
+</main>
 
-<div class="overlay" id="approval-overlay">
-  <div class="modal">
-    <h2>⚠️ Forge wants to run <span id="ap-tool" style="color:var(--accent)"></span></h2>
-    <div class="detail" id="ap-detail"></div>
-    <div class="buttons">
+<div class="veil" id="ap-veil">
+  <div class="modal warn">
+    <h2>Forge wants to run <span class="tool-name" id="ap-tool"></span></h2>
+    <div class="det" id="ap-detail"></div>
+    <div class="acts">
       <button class="deny" onclick="answerApproval(false,false)">Deny</button>
       <button onclick="answerApproval(true,true)">Allow always</button>
       <button class="allow" onclick="answerApproval(true,false)">Allow</button>
@@ -162,227 +283,309 @@
   </div>
 </div>
 
-<div class="overlay" id="diff-overlay" onclick="if(event.target===this)this.classList.remove('on')">
-  <div class="modal" style="width:820px">
-    <h2>Session changes <span id="diff-files" style="color:var(--dim);font-weight:400"></span></h2>
+<div class="veil" id="diff-veil" onclick="if(event.target===this)this.classList.remove('on')">
+  <div class="modal" style="width:860px">
+    <h2>Session changes <span id="diff-files" style="color:var(--ink-faint);font-weight:400;font-family:var(--mono);font-size:11px"></span></h2>
     <pre id="diff-body"></pre>
-    <div class="buttons" style="margin-top:14px">
-      <button onclick="document.getElementById('diff-overlay').classList.remove('on')">Close</button>
-    </div>
+    <div class="acts" style="margin-top:16px"><button onclick="document.getElementById('diff-veil').classList.remove('on')">Close</button></div>
   </div>
 </div>
 
 <script>
+"use strict";
 const $ = (s) => document.querySelector(s);
 const esc = (t) => (t ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-let state = { active: false, status: "idle", mode: "ask", busyPoll: null, msgSeen: 0, evtSeen: 0 };
-let wMode = "ask";
+const S = { active:false, status:"idle", msgSeen:0, evtSeen:0, timer:null, workStart:0, wMode:"ask", pollGen:0 };
 
 async function api(path, body) {
-  const opts = body ? { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) } : {};
+  const opts = body !== undefined
+    ? { method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body) } : {};
   const res = await fetch("/api" + path, opts);
-  if (!res.ok) throw new Error((await res.text()).slice(0, 300));
+  if (!res.ok) { let d; try { d = JSON.parse(await res.text()).detail; } catch(e){} throw new Error(d || res.statusText); }
   return res.json();
 }
 
-/* ── markdown-lite: code fences, inline code, bold ────────── */
+/* ── markdown + tiny highlighter ─────────────────────────── */
+const KW = /\b(def|class|return|import|from|if|elif|else|for|while|try|except|finally|with|as|lambda|pass|raise|yield|async|await|const|let|var|function|export|default|new|typeof|interface|type|public|private|struct|enum|match|fn|pub|use|void|int|str|bool|float|None|null|undefined|true|false|True|False|self|this)\b/g;
+function hl(code) {
+  return esc(code)
+    .replace(/(&quot;.*?&quot;|'[^'\n]*'|`[^`\n]*`)/g, '<span class="s">$1</span>')
+    .replace(/(#[^\n]*|\/\/[^\n]*)/g, '<span class="c">$1</span>')
+    .replace(KW, '<span class="k">$1</span>')
+    .replace(/\b(\d+\.?\d*)\b/g, '<span class="n">$1</span>');
+}
 function md(text) {
-  const parts = text.split(/```(\w*)\n?/);
-  let html = "", inCode = false;
+  const parts = String(text).split(/```(\w*)\n?/);
+  let html = "", lang = "";
   for (let i = 0; i < parts.length; i++) {
-    if (inCode) { html += `<pre><code>${esc(parts[i])}</code></pre>`; inCode = false; }
-    else if (i % 2 === 1) { inCode = true; }
-    else {
+    if (i % 3 === 1) { lang = parts[i]; }
+    else if (i % 3 === 2) {
+      const id = "cb" + Math.random().toString(36).slice(2, 8);
+      html += `<div class="code"><div class="code-bar"><span>${esc(lang) || "code"}</span><button onclick="copyCode('${id}')">COPY</button></div><pre><code id="${id}">${hl(parts[i].replace(/\n$/, ""))}</code></pre></div>`;
+    } else {
       html += esc(parts[i])
         .replace(/`([^`\n]+)`/g, "<code>$1</code>")
-        .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>");
+        .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
+        .replace(/^### (.+)$/gm, "<b>$1</b>")
+        .replace(/^- (.+)$/gm, "&nbsp;•&nbsp;$1");
     }
   }
   return html;
 }
+function copyCode(id) {
+  const el = document.getElementById(id);
+  if (el) navigator.clipboard.writeText(el.textContent);
+}
 
-/* ── folder picker: native via pywebview, else manual ─────── */
-async function pickFolder(inputId) {
-  if (window.pywebview && window.pywebview.api && window.pywebview.api.pick_folder) {
+/* ── folder handling ─────────────────────────────────────── */
+async function pickFolder() {
+  if (window.pywebview?.api?.pick_folder) {
     const folder = await window.pywebview.api.pick_folder();
-    if (folder) $("#" + inputId).value = folder;
-  } else {
-    $("#" + inputId).focus();
-  }
+    if (folder) $("#w-folder").value = folder;
+  } else { $("#w-folder").focus(); }
 }
-
-function syncW() {
-  $("#w-ask").classList.toggle("on", wMode === "ask");
-  $("#w-auto").classList.toggle("on", wMode === "auto");
-}
-
-async function loadModels(selectId, chosen) {
-  const models = await api("/models");
-  const sel = $("#" + selectId);
-  sel.innerHTML = models.map(m => `<option ${m === chosen ? "selected" : ""}>${esc(m)}</option>`).join("")
-    || "<option>(no models — is Ollama running?)</option>";
-}
-
-/* ── session lifecycle ─────────────────────────────────────── */
-async function startSession() {
-  const folder = $("#w-folder").value.trim();
-  $("#welcome-err").textContent = "";
-  $("#w-start").disabled = true;
+async function loadRecent() {
   try {
-    const st = await api("/chat/start", { workspace: folder || null, model: $("#w-model").value, mode: wMode });
+    const recent = await api("/chat/recent");
+    $("#recent").innerHTML = recent.map(p =>
+      `<div class="chip" onclick="document.getElementById('w-folder').value='${esc(p).replace(/\\/g,"\\\\")}'"><span class="path">${esc(p)}</span></div>`).join("");
+  } catch (e) {}
+}
+async function loadModels(selectId, chosen) {
+  try {
+    const models = await api("/models");
+    $("#" + selectId).innerHTML =
+      models.map(m => `<option ${m === chosen ? "selected" : ""}>${esc(m)}</option>`).join("")
+      || "<option value=''>(no models — is Ollama running?)</option>";
+  } catch (e) {}
+}
+function setWMode(mode) {
+  S.wMode = mode;
+  $("#w-ask").classList.toggle("on", mode === "ask");
+  $("#w-auto").classList.toggle("on", mode === "auto");
+}
+
+/* ── session lifecycle ───────────────────────────────────── */
+async function startSession() {
+  $("#w-err").textContent = ""; $("#w-go").disabled = true;
+  try {
+    const st = await api("/chat/start", {
+      workspace: $("#w-folder").value.trim() || null,
+      model: $("#w-model").value || null, mode: S.wMode,
+    });
     enterChat(st);
-  } catch (e) { $("#welcome-err").textContent = e.message; }
-  finally { $("#w-start").disabled = false; }
+  } catch (e) { $("#w-err").textContent = e.message; }
+  finally { $("#w-go").disabled = false; }
 }
-
+async function newChat() {
+  const st = await api("/chat/start", { workspace: $("#h-folder").textContent, model: $("#h-model").value || null, mode: S.wMode });
+  enterChat(st);
+}
 function enterChat(st) {
-  state.active = true; state.mode = st.mode; state.msgSeen = 0; state.evtSeen = 0;
+  S.active = true; S.msgSeen = 0; S.evtSeen = 0; S.status = "idle"; S.wMode = st.mode; S.pollGen++;
   $("#welcome").style.display = "none";
-  $("#topbar").style.display = "flex";
-  $("#thread").style.display = "block";
+  $("#sidebar").classList.add("on");
+  $("#topbar").classList.add("on");
+  $("#thread").classList.add("on");
   $("#composer").classList.add("on");
-  $("#messages").innerHTML = "";
-  $("#folder-path").textContent = st.workspace;
-  loadModels("model-select", st.model);
-  $("#mode-ask").classList.toggle("on", st.mode === "ask");
-  $("#mode-auto").classList.toggle("on", st.mode === "auto");
+  $("#lane").innerHTML = "";
+  $("#h-folder").textContent = st.workspace;
+  $("#h-ask").classList.toggle("on", st.mode === "ask");
+  $("#h-auto").classList.toggle("on", st.mode === "auto");
+  loadModels("h-model", st.model);
+  refreshSessions();
   $("#input").focus();
-  poll();
+  poll(S.pollGen, true);
 }
-
-function newSession() {
-  state.active = false;
-  clearTimeout(state.busyPoll);
-  $("#topbar").style.display = "none";
-  $("#thread").style.display = "none";
-  $("#composer").classList.remove("on");
+function goWelcome() {
+  S.active = false; S.pollGen++;
+  clearTimeout(S.timer);
+  ["sidebar","topbar","thread","composer"].forEach(id => $("#" + id).classList.remove("on"));
   $("#welcome").style.display = "flex";
+  loadRecent();
+}
+async function refreshSessions() {
+  try {
+    const sessions = await api("/chat/sessions");
+    $("#convos").innerHTML = sessions.map(s => `
+      <div class="convo ${s.current ? "active" : ""}" onclick="selectSession('${s.session_id}')">
+        ${s.status === "working" ? '<span class="dot"></span>' : ""}${esc(s.title)}
+      </div>`).join("");
+  } catch (e) {}
+}
+async function selectSession(id) {
+  const st = await api("/chat/select", { session_id: id });
+  enterChat(st);
 }
 
-/* ── messaging ─────────────────────────────────────────────── */
+/* ── messaging ───────────────────────────────────────────── */
 async function sendMessage() {
   const text = $("#input").value.trim();
-  if (!text || state.status === "working") return;
+  if (!text) return;
   $("#input").value = ""; autosize();
-  try { await api("/chat/message", { text }); } catch (e) { addBubble("assistant", e.message, "error"); }
-  poll(true);
+  try { await api("/chat/message", { text }); }
+  catch (e) { addForge(e.message, "error"); }
+  poll(S.pollGen, true);
+}
+async function stopTurn() { try { await api("/chat/stop", {}); } catch (e) {} }
+
+function addUser(text) {
+  $("#lane").insertAdjacentHTML("beforeend",
+    `<div class="m m-user"><div class="bub">${esc(text)}</div></div>`);
+}
+function addForge(text, kind) {
+  const cls = kind === "error" ? "err" : kind === "command" ? "cmd" : "";
+  $("#lane").insertAdjacentHTML("beforeend",
+    `<div class="m m-forge ${cls}"><div class="tag">✦ FORGE</div><div class="body">${md(text)}</div></div>`);
 }
 
-function addBubble(role, text, kind) {
-  const div = document.createElement("div");
-  div.className = `msg ${role} ${kind || ""}`;
-  const who = role === "user" ? "You" : "Forge";
-  div.innerHTML = `<div class="who">${who}</div><div class="bubble">${md(text)}</div>`;
-  $("#messages").appendChild(div);
-}
+const GLYPHS = { read_file:"📄", write_file:"✏️", edit_file:"✏️", list_dir:"🗂", run_command:"▶", grep:"🔎", find_files:"🔎", search_code:"🧭", find_symbol:"🧬", who_imports:"🕸", git:"⎇" };
+function primaryArg(a) { return a?.path || a?.command || a?.pattern || a?.query || a?.name || a?.glob || a?.args || JSON.stringify(a || {}); }
 
-function addActivity(events) {
-  let box = $("#messages").lastElementChild;
-  if (!box || !box.classList.contains("activity")) {
-    box = document.createElement("div");
-    box.className = "activity inner-act";
-    $("#messages").appendChild(box);
+function currentToolBox() {
+  const lane = $("#lane");
+  const real = [...lane.children].filter(el => el.id !== "working" && el.id !== "live-msg");
+  let box = real[real.length - 1];
+  if (!box || !box.classList.contains("tools")) {
+    box = document.createElement("div"); box.className = "tools"; lane.appendChild(box);
   }
+  return box;
+}
+function lastPendingCard() {
+  const cards = document.querySelectorAll("#lane .tcard");
+  for (let i = cards.length - 1; i >= 0; i--) {
+    if (cards[i].querySelector(".tstat")) return cards[i];
+  }
+  return null;
+}
+function addToolEvents(events) {
   for (const e of events) {
     if (e.kind === "tool_call") {
-      const arg = esc(JSON.stringify(e.arguments || {})).slice(0, 130);
-      box.insertAdjacentHTML("beforeend", `<div class="row"><span class="tool">⚒ ${esc(e.tool)}</span><span class="arg">${arg}</span></div>`);
-    } else if (e.kind === "tool_result" && e.ok === false) {
-      box.insertAdjacentHTML("beforeend", `<div class="row"><span class="bad">✗</span><span class="arg bad">${esc((e.error || "error").slice(0, 130))}</span></div>`);
+      const card = document.createElement("details"); card.className = "tcard";
+      card.innerHTML = `<summary><span class="glyph">${GLYPHS[e.tool] || "⚒"}</span><span class="tname">${esc(e.tool)}</span><span class="targ">${esc(String(primaryArg(e.arguments)))}</span><span class="tstat">…</span></summary><div class="tbody"><div class="sect">arguments</div>${esc(JSON.stringify(e.arguments || {}, null, 1))}</div>`;
+      currentToolBox().appendChild(card);
     } else if (e.kind === "tool_result") {
-      const last = box.querySelector(".row:last-child .tool");
-      if (last) last.insertAdjacentHTML("beforeend", ` <span class="ok">✓</span>`);
+      const card = lastPendingCard();
+      if (!card) continue;
+      const stat = card.querySelector(".tstat");
+      if (stat) stat.outerHTML = e.ok ? '<span class="st-ok">✓</span>' : '<span class="st-err">✗</span>';
+      const body = card.querySelector(".tbody");
+      if (body) {
+        const detail = e.ok ? (e.output || "(done)") : (e.error || "error");
+        body.insertAdjacentHTML("beforeend", `<div class="sect">${e.ok ? "result" : "error"}</div>${esc(detail)}`);
+      }
     }
   }
 }
 
-/* ── polling loop ──────────────────────────────────────────── */
-async function poll(fast) {
-  if (!state.active) return;
-  clearTimeout(state.busyPoll);
+/* live streamed text */
+function setPartial(text) {
+  let live = $("#live-msg");
+  if (!text) { if (live) live.remove(); return; }
+  if (!live) {
+    $("#lane").insertAdjacentHTML("beforeend",
+      `<div class="m m-forge" id="live-msg"><div class="tag">✦ FORGE</div><div class="body"></div></div>`);
+    live = $("#live-msg");
+  }
+  live.querySelector(".body").innerHTML = md(text) + '<span class="cursor"></span>';
+}
+
+/* ── polling ─────────────────────────────────────────────── */
+async function poll(gen, fast) {
+  if (!S.active || gen !== S.pollGen) return;
+  clearTimeout(S.timer);
   try {
-    const st = await api(`/chat/updates?events_after=${state.evtSeen}&messages_after=${state.msgSeen}`);
-    state.status = st.status;
+    const st = await api(`/chat/updates?events_after=${S.evtSeen}&messages_after=${S.msgSeen}`);
+    const wasWorking = S.status === "working";
+    S.status = st.status;
+    if (st.status === "working" && !wasWorking) S.workStart = Date.now();
+
     const toolEvents = st.events.filter(e => e.kind === "tool_call" || e.kind === "tool_result");
-    if (toolEvents.length) addActivity(toolEvents);
-    state.evtSeen = st.event_count;
-    for (const m of st.messages) addBubble(m.role, m.text, m.kind);
-    state.msgSeen = st.message_count;
-    if (st.messages.length || toolEvents.length) {
+    if (toolEvents.length) { setPartial(""); addToolEvents(toolEvents); }
+    S.evtSeen = st.event_count;
+
+    if (st.messages.length) setPartial("");
+    for (const m of st.messages) m.role === "user" ? addUser(m.text) : addForge(m.text, m.kind);
+    S.msgSeen = st.message_count;
+
+    if (st.status === "working" && st.partial) setPartial(st.partial);
+    if (st.status !== "working") setPartial("");
+
+    const w = $("#working");
+    if (!w) {
+      $("#lane").insertAdjacentHTML("beforeend",
+        `<div id="working"><div class="flame"></div><span id="work-label"></span><span id="queued-note"></span></div>`);
+    }
+    $("#working").classList.toggle("on", st.status === "working");
+    if (st.status === "working") {
+      $("#lane").appendChild($("#working"));
+      $("#work-label").textContent = `forging… ${Math.max(0, Math.round((Date.now() - S.workStart)/1000))}s`;
+      $("#queued-note").textContent = st.queued ? ` · ${st.queued} queued` : "";
+    }
+
+    $("#send").disabled = st.status === "working";
+    $("#stop").classList.toggle("on", st.status === "working");
+    if (st.pending_approval) { $("#ap-tool").textContent = st.pending_approval.tool; $("#ap-detail").textContent = st.pending_approval.detail; $("#ap-veil").classList.add("on"); }
+    else $("#ap-veil").classList.remove("on");
+
+    $("#u-model").textContent = st.model;
+    $("#u-in").textContent = st.usage.prompt_tokens.toLocaleString();
+    $("#u-out").textContent = st.usage.completion_tokens.toLocaleString();
+    $("#u-changed").textContent = st.changed_files.length ? `${st.changed_files.length} file(s) changed` : "";
+
+    if (st.messages.length || toolEvents.length || st.partial) {
       $("#thread").scrollTop = $("#thread").scrollHeight;
     }
-    $("#send").disabled = st.status === "working";
-    setThinking(st.status === "working");
-    if (st.pending_approval) showApproval(st.pending_approval);
-    else $("#approval-overlay").classList.remove("on");
-  } catch (e) { /* server briefly busy — keep polling */ }
-  const delay = state.status === "working" || fast ? 650 : 2500;
-  state.busyPoll = setTimeout(poll, delay);
+    if (st.status === "working" || wasWorking) refreshSessions();
+  } catch (e) { /* transient — keep polling */ }
+  S.timer = setTimeout(() => poll(gen), S.status === "working" || fast ? 450 : 2500);
 }
 
-function setThinking(on) {
-  let el = $("#thinking");
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "thinking";
-    el.innerHTML = `<div class="pulse"></div><span>Forge is working…</span>`;
-    $("#thread").appendChild(el);
-  }
-  el.classList.toggle("on", on);
-  if (on) $("#thread").appendChild(el);
-}
-
-/* ── approvals ─────────────────────────────────────────────── */
-function showApproval(pending) {
-  $("#ap-tool").textContent = pending.tool;
-  $("#ap-detail").textContent = pending.detail;
-  $("#approval-overlay").classList.add("on");
-}
+/* ── approvals / diff / undo ─────────────────────────────── */
 async function answerApproval(approved, always) {
-  $("#approval-overlay").classList.remove("on");
+  $("#ap-veil").classList.remove("on");
   try { await api("/chat/approval", { approved, always }); } catch (e) {}
-  poll(true);
+  poll(S.pollGen, true);
 }
-
-/* ── top bar actions ───────────────────────────────────────── */
-$("#folder-chip").onclick = () => newSession();
-$("#model-select").onchange = async () => {
-  try { await api("/chat/model", { model: $("#model-select").value }); } catch (e) {}
-};
 async function showDiff() {
   const d = await api("/chat/diff");
-  const st = await api("/chat/updates");
-  $("#diff-files").textContent = st.changed_files.length ? "· " + st.changed_files.join(", ") : "";
-  $("#diff-body").innerHTML = (d.diff || "No changes in this session yet.")
-    .split("\n").map(l => {
-      let cls = l.startsWith("+++") || l.startsWith("---") || l.startsWith("@@") ? "diff-meta"
-        : l.startsWith("+") ? "diff-add" : l.startsWith("-") ? "diff-del" : "";
-      return `<span class="${cls}">${esc(l)}</span>`;
-    }).join("\n");
-  $("#diff-overlay").classList.add("on");
+  const st = await api("/chat/updates?events_after=999999&messages_after=999999");
+  $("#diff-files").textContent = st.changed_files.join("  ·  ");
+  $("#diff-body").innerHTML = (d.diff || "No changes in this session yet.").split("\n").map(l => {
+    const cls = /^(\+\+\+|---|@@)/.test(l) ? "dm" : l.startsWith("+") ? "da" : l.startsWith("-") ? "dd" : "";
+    return `<span class="${cls}">${esc(l)}</span>`;
+  }).join("\n");
+  $("#diff-veil").classList.add("on");
 }
 async function undoAll() {
   if (!confirm("Revert every file change made in this session?")) return;
   const r = await api("/chat/undo", {});
-  addBubble("assistant", r.restored.length ? "Reverted: " + r.restored.join(", ") : "Nothing to undo.", "command");
-  poll(true);
+  addForge(r.restored.length ? "Reverted: " + r.restored.join(", ") : "Nothing to undo.", "command");
 }
 
-/* ── composer ergonomics ───────────────────────────────────── */
+/* ── top bar controls ────────────────────────────────────── */
+$("#h-model").addEventListener("change", async () => {
+  try { await api("/chat/model", { model: $("#h-model").value }); refreshSessions(); } catch (e) {}
+});
+
+/* ── composer ergonomics ─────────────────────────────────── */
 const input = $("#input");
-function autosize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 180) + "px"; }
+function autosize() { input.style.height = "auto"; input.style.height = Math.min(input.scrollHeight, 190) + "px"; }
 input.addEventListener("input", autosize);
 input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
-/* ── boot ──────────────────────────────────────────────────── */
+/* ── boot ────────────────────────────────────────────────── */
 (async () => {
   await loadModels("w-model");
+  await loadRecent();
+  try { const h = await api("/health"); if (!$("#w-folder").value) $("#w-folder").value = h.workspace; } catch (e) {}
+  // reattach to a live session after a reload (e.g. the window was refreshed)
   try {
-    const h = await api("/health");
-    if (!$("#w-folder").value) $("#w-folder").value = h.workspace;
-  } catch (e) {}
+    const st = await api("/chat/updates?events_after=999999&messages_after=999999");
+    enterChat(st);
+  } catch (e) { /* no active session — stay on welcome */ }
 })();
 </script>
 </body>

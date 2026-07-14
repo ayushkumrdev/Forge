@@ -82,6 +82,10 @@ class ChatSession:
         self.recorder = recorder or Recorder(session_id, self.workspace, store=store)
         self.usage = Usage()
         self.history: list[ChatMessage] = []
+        # optional hooks set by hosts (the desktop app wires these):
+        self.on_stream = None  # Callable[[str], None] — receives content deltas
+        self.on_step = None  # Callable[[], None] — called before each LLM step
+        self.should_stop = None  # Callable[[], bool] — soft cancel
 
         self._guard = SafetyGuard(self.workspace)
         self.ledger = ChangeLedger(self.workspace, session_id)
@@ -137,11 +141,18 @@ class ChatSession:
 
         nudged = False
         for _step in range(self.settings.max_agent_steps):
+            if self._cancelled():
+                return self._finish_stopped()
+            if self.on_step is not None:
+                self.on_step()
             response = self.llm.chat(
                 [ChatMessage(role="system", content=self._system), *self.history],
                 tools=self.registry.specs(),
+                on_token=self.on_stream,
             )
             self.usage.add(response.usage)
+            if self._cancelled():
+                return self._finish_stopped()
             message = recover_inline_tool_call(response.message, self.registry.names())
 
             if not message.tool_calls:
@@ -166,7 +177,12 @@ class ChatSession:
                 self.recorder.event("chat", "tool_call", tool=call.name, arguments=call.arguments)
                 result = self.registry.execute(call.name, call.arguments)
                 self.recorder.event(
-                    "chat", "tool_result", tool=call.name, ok=result.ok, error=result.error
+                    "chat",
+                    "tool_result",
+                    tool=call.name,
+                    ok=result.ok,
+                    error=result.error,
+                    output=(result.output[:400] if result.ok else None),
                 )
                 self.history.append(
                     ChatMessage(
@@ -179,6 +195,15 @@ class ChatSession:
         self.save_transcript()
         note = "Stopped: step budget exhausted for this turn."
         self.history.append(ChatMessage(role="assistant", content=note))
+        return note
+
+    def _cancelled(self) -> bool:
+        return self.should_stop is not None and self.should_stop()
+
+    def _finish_stopped(self) -> str:
+        note = "Stopped by user."
+        self.history.append(ChatMessage(role="assistant", content=note))
+        self.save_transcript()
         return note
 
     def _expand_mentions(self, text: str) -> str:

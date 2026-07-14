@@ -31,9 +31,12 @@ def create_app(
     settings: ForgeSettings | None = None,
     llm_factory: LLMFactory | None = None,
     chat_llm_factory: ChatLLMFactory | None = None,
+    app_state_path: Path | None = None,
 ) -> FastAPI:
     workspace = workspace.resolve()
     settings = settings or ForgeSettings()
+    if app_state_path is None:
+        app_state_path = Path.home() / ".forge" / "app_state.json"
 
     def default_llm() -> OllamaClient:
         return OllamaClient(
@@ -54,7 +57,9 @@ def create_app(
         )
 
     manager = RunManager(workspace, settings, llm_factory or default_llm)
-    chat_manager = ChatManager(workspace, settings, chat_llm_factory or default_chat_llm)
+    chat_manager = ChatManager(
+        workspace, settings, chat_llm_factory or default_chat_llm, state_path=app_state_path
+    )
     app = FastAPI(title="Forge", version=__version__)
     app.state.manager = manager
     app.state.chat_manager = chat_manager

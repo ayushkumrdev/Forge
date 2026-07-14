@@ -4,9 +4,13 @@ concrete provider, so backends (Ollama today, others later) are swappable."""
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+# receives each content delta as it is generated (streaming)
+TokenCallback = Callable[[str], None]
 
 Role = Literal["system", "user", "assistant", "tool"]
 
@@ -68,4 +72,5 @@ class LLMClient(ABC):
         messages: list[ChatMessage],
         tools: list[ToolSpec] | None = None,
         temperature: float | None = None,
+        on_token: TokenCallback | None = None,
     ) -> LLMResponse: ...

@@ -64,6 +64,37 @@ def test_chat_plain_text_response():
     assert response.message.tool_calls == []
 
 
+def test_streaming_assembles_content_and_calls_on_token():
+    ndjson = b"\n".join(
+        [
+            json.dumps({"message": {"role": "assistant", "content": "Hel"}}).encode(),
+            json.dumps({"message": {"role": "assistant", "content": "lo"}}).encode(),
+            json.dumps(
+                {
+                    "done": True,
+                    "message": {"role": "assistant", "content": ""},
+                    "prompt_eval_count": 7,
+                    "eval_count": 5,
+                    "total_duration": 2_000_000_000,
+                }
+            ).encode(),
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert json.loads(request.content)["stream"] is True
+        return httpx.Response(200, content=ndjson)
+
+    tokens: list[str] = []
+    response = _client_with(handler).chat(
+        [ChatMessage(role="user", content="hi")], on_token=tokens.append
+    )
+    assert tokens == ["Hel", "lo"]
+    assert response.message.content == "Hello"
+    assert response.usage.completion_tokens == 5
+    assert response.usage.duration_ms == 2000
+
+
 def test_connect_error_raises_friendly_llmerror():
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused")

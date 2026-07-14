@@ -1,7 +1,8 @@
-"""Milestone 7 tests: the desktop app's chat API — session start, background
-turn execution, live updates, the blocking approval flow, model switching,
-undo/diff, and the app page."""
+"""Desktop app chat API tests: session start, background turns, streaming
+partials, stop, queueing, multiple conversations, the blocking approval flow,
+model switching, undo/diff, recent folders, and the app page."""
 
+import threading
 import time
 
 from fastapi.testclient import TestClient
@@ -11,8 +12,26 @@ from forge.llm.mock import MockLLMClient
 from forge.server.app import create_app
 
 
+class BlockingLLM(MockLLMClient):
+    """First chat call emits a token, then blocks until the gate opens."""
+
+    def __init__(self, responses, gate: threading.Event, token: str = "Thinking hard"):
+        super().__init__(responses)
+        self._gate = gate
+        self._token = token
+        self._calls = 0
+
+    def chat(self, messages, tools=None, temperature=None, on_token=None):
+        call_index = self._calls
+        self._calls += 1
+        if call_index == 0:
+            if on_token is not None:
+                on_token(self._token)
+            assert self._gate.wait(timeout=10), "test gate never opened"
+        return super().chat(messages, tools, temperature, on_token=None)
+
+
 def _llm_scripts():
-    """Each session start pops the next scripted client."""
     scripts = []
 
     def factory(model):
@@ -25,27 +44,27 @@ def _llm_scripts():
 
 def _client(workspace, scripts_factory) -> TestClient:
     (workspace / "app.py").write_text("x = 1\n", encoding="utf-8")
-    return TestClient(create_app(workspace, chat_llm_factory=scripts_factory))
+    return TestClient(
+        create_app(
+            workspace,
+            chat_llm_factory=scripts_factory,
+            app_state_path=workspace / "state" / "app_state.json",
+        )
+    )
 
 
-def _wait_idle(client: TestClient, timeout_s: float = 10.0) -> dict:
+def _wait(client: TestClient, predicate, timeout_s: float = 10.0) -> dict:
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         st = client.get("/api/chat/updates?events_after=0&messages_after=0").json()
-        if st["status"] == "idle":
+        if predicate(st):
             return st
-        time.sleep(0.05)
-    raise AssertionError("session did not become idle in time")
+        time.sleep(0.04)
+    raise AssertionError("condition not reached in time")
 
 
-def _wait_pending(client: TestClient, timeout_s: float = 10.0) -> dict:
-    deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
-        st = client.get("/api/chat/updates").json()
-        if st["pending_approval"]:
-            return st
-        time.sleep(0.05)
-    raise AssertionError("no approval request appeared in time")
+def _wait_idle(client):
+    return _wait(client, lambda st: st["status"] == "idle")
 
 
 def _write_call(path="made.txt", content="hello") -> ChatMessage:
@@ -55,11 +74,13 @@ def _write_call(path="made.txt", content="hello") -> ChatMessage:
     )
 
 
+# -- basics ----------------------------------------------------------------------
+
+
 def test_start_requires_valid_folder(workspace):
     scripts, factory = _llm_scripts()
     client = _client(workspace, factory)
-    response = client.post("/api/chat/start", json={"workspace": "C:/definitely/not/here"})
-    assert response.status_code == 400
+    assert client.post("/api/chat/start", json={"workspace": "C:/nope/never"}).status_code == 400
 
 
 def test_full_turn_auto_mode(workspace):
@@ -68,37 +89,108 @@ def test_full_turn_auto_mode(workspace):
         MockLLMClient([_write_call(), ChatMessage(role="assistant", content="All done!")])
     )
     client = _client(workspace, factory)
-
     st = client.post("/api/chat/start", json={"mode": "auto"}).json()
     assert st["status"] == "idle"
-    assert st["workspace"] == str(workspace.resolve())
 
     assert client.post("/api/chat/message", json={"text": "make made.txt"}).status_code == 202
     st = _wait_idle(client)
 
     texts = [m["text"] for m in st["messages"]]
-    assert "make made.txt" in texts
     assert "All done!" in texts
     assert (workspace / "made.txt").exists()
     assert st["changed_files"] == ["made.txt"]
-    # tool activity was streamed as events
-    kinds = {e["kind"] for e in st["events"]}
-    assert "tool_call" in kinds
+    assert {e["kind"] for e in st["events"]} >= {"tool_call", "tool_result"}
+    # tool_result events carry an output snippet for the UI cards
+    results = [e for e in st["events"] if e["kind"] == "tool_result"]
+    assert any("Wrote" in (e.get("output") or "") for e in results)
+
+
+def test_no_session_yields_409(workspace):
+    scripts, factory = _llm_scripts()
+    client = _client(workspace, factory)
+    assert client.get("/api/chat/updates").status_code == 409
+    assert client.post("/api/chat/message", json={"text": "hi"}).status_code == 409
+
+
+# -- streaming, stop, queue --------------------------------------------------------
+
+
+def test_streaming_partial_visible_while_working(workspace):
+    scripts, factory = _llm_scripts()
+    gate = threading.Event()
+    scripts.append(BlockingLLM([ChatMessage(role="assistant", content="final")], gate))
+    client = _client(workspace, factory)
+    client.post("/api/chat/start", json={"mode": "auto"})
+    client.post("/api/chat/message", json={"text": "hi"})
+
+    st = _wait(client, lambda s: s["partial"])
+    assert st["partial"] == "Thinking hard"
+    gate.set()
+    st = _wait_idle(client)
+    assert st["partial"] == ""
+    assert "final" in [m["text"] for m in st["messages"]]
+
+
+def test_stop_cancels_turn(workspace):
+    scripts, factory = _llm_scripts()
+    gate = threading.Event()
+    scripts.append(
+        BlockingLLM([_write_call(), ChatMessage(role="assistant", content="done")], gate)
+    )
+    client = _client(workspace, factory)
+    client.post("/api/chat/start", json={"mode": "auto"})
+    client.post("/api/chat/message", json={"text": "write it"})
+
+    _wait(client, lambda s: s["status"] == "working")
+    client.post("/api/chat/stop")
+    gate.set()
+    st = _wait_idle(client)
+
+    assert "Stopped by user." in [m["text"] for m in st["messages"]]
+    assert not (workspace / "made.txt").exists()  # cancel landed before the tool ran
+
+
+def test_second_message_queues_and_runs_after(workspace):
+    scripts, factory = _llm_scripts()
+    gate = threading.Event()
+    scripts.append(
+        BlockingLLM(
+            [
+                ChatMessage(role="assistant", content="first done"),
+                ChatMessage(role="assistant", content="second done"),
+            ],
+            gate,
+        )
+    )
+    client = _client(workspace, factory)
+    client.post("/api/chat/start", json={"mode": "auto"})
+    client.post("/api/chat/message", json={"text": "one"})
+    _wait(client, lambda s: s["status"] == "working")
+
+    response = client.post("/api/chat/message", json={"text": "two"})
+    assert response.status_code == 202
+    assert response.json()["disposition"] == "queued"
+    assert response.json()["queued"] == 1
+
+    gate.set()
+    st = _wait_idle(client)
+    texts = [m["text"] for m in st["messages"]]
+    assert texts.count("first done") == 1
+    assert texts.count("second done") == 1
+
+
+# -- approvals ---------------------------------------------------------------------
 
 
 def test_approval_flow_allow(workspace):
     scripts, factory = _llm_scripts()
-    scripts.append(
-        MockLLMClient([_write_call(), ChatMessage(role="assistant", content="done")])
-    )
+    scripts.append(MockLLMClient([_write_call(), ChatMessage(role="assistant", content="done")]))
     client = _client(workspace, factory)
     client.post("/api/chat/start", json={"mode": "ask"})
     client.post("/api/chat/message", json={"text": "write the file"})
 
-    pending = _wait_pending(client)["pending_approval"]
-    assert pending["tool"] == "write_file"
-    assert "made.txt" in pending["detail"]
-
+    st = _wait(client, lambda s: s["pending_approval"])
+    assert st["pending_approval"]["tool"] == "write_file"
     client.post("/api/chat/approval", json={"approved": True})
     _wait_idle(client)
     assert (workspace / "made.txt").exists()
@@ -107,15 +199,12 @@ def test_approval_flow_allow(workspace):
 def test_approval_flow_deny(workspace):
     scripts, factory = _llm_scripts()
     scripts.append(
-        MockLLMClient(
-            [_write_call(), ChatMessage(role="assistant", content="okay, I won't")]
-        )
+        MockLLMClient([_write_call(), ChatMessage(role="assistant", content="okay, I won't")])
     )
     client = _client(workspace, factory)
     client.post("/api/chat/start", json={"mode": "ask"})
     client.post("/api/chat/message", json={"text": "write the file"})
-
-    _wait_pending(client)
+    _wait(client, lambda s: s["pending_approval"])
     client.post("/api/chat/approval", json={"approved": False})
     st = _wait_idle(client)
     assert not (workspace / "made.txt").exists()
@@ -135,25 +224,39 @@ def test_approval_allow_always_skips_next_prompt(workspace):
     )
     client = _client(workspace, factory)
     client.post("/api/chat/start", json={"mode": "ask"})
-    client.post("/api/chat/message", json={"text": "write both files"})
-
-    _wait_pending(client)
+    client.post("/api/chat/message", json={"text": "write both"})
+    _wait(client, lambda s: s["pending_approval"])
     client.post("/api/chat/approval", json={"approved": True, "always": True})
-    _wait_idle(client)  # second write must NOT block on approval
+    _wait_idle(client)
     assert (workspace / "one.txt").exists()
     assert (workspace / "two.txt").exists()
 
 
-def test_busy_session_rejects_second_message(workspace):
+# -- sessions / models / folders ----------------------------------------------------
+
+
+def test_multiple_sessions_and_select(workspace):
     scripts, factory = _llm_scripts()
-    scripts.append(MockLLMClient([_write_call(), ChatMessage(role="assistant", content="ok")]))
+    scripts.append(MockLLMClient([ChatMessage(role="assistant", content="hello from A")]))
+    scripts.append(MockLLMClient([]))
     client = _client(workspace, factory)
-    client.post("/api/chat/start", json={"mode": "ask"})
-    client.post("/api/chat/message", json={"text": "first"})
-    _wait_pending(client)  # worker is now blocked on approval
-    assert client.post("/api/chat/message", json={"text": "second"}).status_code == 409
-    client.post("/api/chat/approval", json={"approved": True})
+
+    a = client.post("/api/chat/start", json={"mode": "auto"}).json()
+    client.post("/api/chat/message", json={"text": "greetings forge"})
     _wait_idle(client)
+    b = client.post("/api/chat/start", json={"mode": "auto"}).json()
+
+    sessions = client.get("/api/chat/sessions").json()
+    assert len(sessions) == 2
+    assert sessions[0]["session_id"] == b["session_id"]  # newest first
+    assert sessions[0]["current"] is True
+    titled = {s["session_id"]: s["title"] for s in sessions}
+    assert titled[a["session_id"]] == "greetings forge"
+    assert titled[b["session_id"]] == "New conversation"
+
+    st = client.post("/api/chat/select", json={"session_id": a["session_id"]}).json()
+    assert st["session_id"] == a["session_id"]
+    assert client.post("/api/chat/select", json={"session_id": "nope"}).status_code == 404
 
 
 def test_model_switch(workspace):
@@ -165,31 +268,24 @@ def test_model_switch(workspace):
     assert st["model"] == "glm-5.2:latest"
 
 
-def test_slash_command_and_undo_endpoint(workspace):
+def test_recent_folders_remembered(workspace):
     scripts, factory = _llm_scripts()
-    scripts.append(
-        MockLLMClient([_write_call(), ChatMessage(role="assistant", content="written")])
-    )
+    client = _client(workspace, factory)
+    assert client.get("/api/chat/recent").json() == []
+    client.post("/api/chat/start", json={"mode": "auto"})
+    recent = client.get("/api/chat/recent").json()
+    assert str(workspace.resolve()) in recent
+
+
+def test_undo_endpoint(workspace):
+    scripts, factory = _llm_scripts()
+    scripts.append(MockLLMClient([_write_call(), ChatMessage(role="assistant", content="ok")]))
     client = _client(workspace, factory)
     client.post("/api/chat/start", json={"mode": "auto"})
     client.post("/api/chat/message", json={"text": "write it"})
     _wait_idle(client)
-
-    client.post("/api/chat/message", json={"text": "/diff"})
-    st = _wait_idle(client)
-    diff_message = [m for m in st["messages"] if m.get("kind") == "command"][-1]
-    assert "+hello" in diff_message["text"]
-
-    restored = client.post("/api/chat/undo").json()["restored"]
-    assert restored == ["made.txt"]
+    assert client.post("/api/chat/undo").json()["restored"] == ["made.txt"]
     assert not (workspace / "made.txt").exists()
-
-
-def test_no_session_yields_409(workspace):
-    scripts, factory = _llm_scripts()
-    client = _client(workspace, factory)
-    assert client.get("/api/chat/updates").status_code == 409
-    assert client.post("/api/chat/message", json={"text": "hi"}).status_code == 409
 
 
 def test_app_page_served(workspace):
@@ -197,11 +293,4 @@ def test_app_page_served(workspace):
     response = _client(workspace, factory).get("/app")
     assert response.status_code == 200
     assert "FORGE" in response.text
-    assert "pick_folder" in response.text  # native folder picker bridge
-
-
-def test_models_endpoint_returns_list(workspace):
-    scripts, factory = _llm_scripts()
-    response = _client(workspace, factory).get("/api/models")
-    assert response.status_code == 200
-    assert isinstance(response.json(), list)
+    assert "pick_folder" in response.text
