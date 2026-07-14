@@ -26,6 +26,7 @@ from forge.safety.guard import SafetyGuard
 from forge.telemetry import Recorder
 from forge.tools.base import ToolRegistry
 from forge.tools.changes import ChangeLedger
+from forge.tools.code_intel import FindSymbolTool, WhoImportsTool
 from forge.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from forge.tools.git_tool import GitTool
 from forge.tools.search import GlobTool, GrepTool
@@ -108,12 +109,17 @@ class ExecutionLoop:
         report = RunReport(run_id=self.run_id, request=request, status="failed")
         try:
             snapshot = RepoScanner(
-                self.workspace, max_tree_entries=self.settings.max_tree_entries
+                self.workspace,
+                max_tree_entries=self.settings.max_tree_entries,
+                cache_path=self.workspace / ".forge" / "repo_index.json",
             ).scan()
             repo_summary = snapshot.summary(self.settings.max_summary_chars)
             self.recorder.event(
                 "orchestrator", "repo_scanned", files=len(snapshot.files)
             )
+            # code-intelligence tools need the fresh snapshot
+            self._registry.register(FindSymbolTool(snapshot))
+            self._registry.register(WhoImportsTool(snapshot))
 
             plan = self.planner.plan(request, repo_summary)
             report.plan_summary = plan.summary

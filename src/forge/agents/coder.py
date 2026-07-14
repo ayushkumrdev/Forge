@@ -19,7 +19,9 @@ Working rules:
 - edit_file old_string must be copied EXACTLY from the read_file output. If an
   edit_file call fails twice on the same file, stop retrying it: read the file
   and call write_file with the complete corrected content instead.
-- Use grep/find_files to locate relevant code instead of guessing paths.
+- Use find_symbol to jump to a definition, who_imports to see what depends on
+  a file before changing it, and grep/find_files for everything else. Never
+  guess paths.
 - Make the smallest change that satisfies the task. Follow the existing code
   style of the repository.
 - Validate your work: if the repository has tests or the task includes

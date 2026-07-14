@@ -75,7 +75,10 @@ def index(
     repo: Path = typer.Option(Path("."), help="Repository to scan."),
 ) -> None:
     """Scan a repository and print its structure, languages and symbols."""
-    snapshot = RepoScanner(repo).scan()
+    workspace = repo.resolve()
+    snapshot = RepoScanner(
+        workspace, cache_path=workspace / ".forge" / "repo_index.json"
+    ).scan()
     console.print(snapshot.summary())
 
 
@@ -94,7 +97,11 @@ def plan(
 
     from forge.agents.planner import Planner
 
-    snapshot = RepoScanner(workspace, settings.max_tree_entries).scan()
+    snapshot = RepoScanner(
+        workspace,
+        settings.max_tree_entries,
+        cache_path=workspace / ".forge" / "repo_index.json",
+    ).scan()
     planner = Planner(_client(settings), recorder, settings.max_plan_tasks)
     result = planner.plan(request, snapshot.summary(settings.max_summary_chars))
     store.finish_run(run_id, "success", result.model_dump())
