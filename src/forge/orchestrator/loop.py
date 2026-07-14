@@ -30,11 +30,18 @@ from forge.telemetry import Recorder
 from forge.tools.base import ToolRegistry
 from forge.tools.changes import ChangeLedger
 from forge.tools.code_intel import FindSymbolTool, WhoImportsTool
-from forge.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from forge.tools.filesystem import (
+    DeleteFileTool,
+    EditFileTool,
+    ListDirTool,
+    ReadFileTool,
+    WriteFileTool,
+)
 from forge.tools.git_tool import GitTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import RunCommandTool
+from forge.tools.web import FetchUrlTool
 
 
 class TaskResult(BaseModel):
@@ -99,6 +106,7 @@ class ExecutionLoop:
                 ReadFileTool(self._guard),
                 WriteFileTool(self._guard, self.ledger),
                 EditFileTool(self._guard, self.ledger),
+                DeleteFileTool(self._guard, self.ledger),
                 ListDirTool(self._guard),
                 RunCommandTool(
                     self._guard, self.workspace, self.settings.command_timeout_s
@@ -106,6 +114,7 @@ class ExecutionLoop:
                 GrepTool(self.workspace),
                 GlobTool(self.workspace),
                 GitTool(self.workspace),
+                FetchUrlTool(),
             ]
         )
 

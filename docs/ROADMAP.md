@@ -67,7 +67,37 @@ behind an existing interface.
   arguments/results, code blocks with copy + syntax highlighting, live
   elapsed-time working indicator, token usage footer
 
-## Milestone 9 — Execution isolation & scale
+## ✅ Milestone 9 — God prompt + more tools
+- Rewrote the chat system prompt for small local models: explicit tool
+  protocol with a worked example, prime directives (act don't instruct, verify
+  everything, finish the whole request), a step-by-step workflow, and a
+  recovery playbook for the failure modes 7B models hit
+- New `delete_file` tool — ledgered and reversible with /undo, permission-gated
+- New `fetch_url` tool — read web docs/API references (HTML stripped, read-only)
+- Fixed the markdown/copy-button bug: multi-code-block replies now render with
+  working ⧉ COPY buttons (with clipboard fallback + copied feedback)
+
+## ✅ Milestone 10 — Grounding layer (verifier-in-the-loop)
+Attacks hallucination structurally, not with prompting. Reality is the verifier:
+- **Self-repairing edits** (`edit_repair.py`): three-tier match — exact, then
+  whitespace/CRLF/indent-tolerant auto-apply to the file's REAL bytes, then a
+  fuzzy "closest actual snippet" correction. Kills the `old_string not found`
+  retry death-spiral that small models fall into (proven on the exact failure
+  modes seen in earlier live runs).
+- Never invents an edit location; only ever applies a replacement to text that
+  provably exists in the file.
+
+### Next grounding mechanisms (roadmap)
+- **Grammar-constrained tool calls** via Ollama structured outputs — the model
+  cannot emit malformed calls.
+- **Retrieval pre-flight** — auto-inject the real relevant code before the model
+  generates, so it can't hallucinate APIs.
+- **Verifier-guided best-of-N** — sample k candidate actions, keep the one that
+  compiles / passes checks (test-time compute for local models).
+- **FIM editing** — use qwen-coder's fill-in-the-middle training instead of
+  error-prone old_string/new_string for insertions.
+
+## Milestone 11 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics

@@ -34,7 +34,7 @@ def test_edit_requires_unique_match(guard, ledger, workspace):
 
     result = edit.run(path="code.py", old_string="x = 1", new_string="x = 2")
     assert not result.ok
-    assert "2 times" in result.error
+    assert "2 places" in result.error  # ambiguous match reported
 
     result = edit.run(path="code.py", old_string="missing", new_string="y")
     assert not result.ok

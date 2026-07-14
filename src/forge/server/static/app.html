@@ -315,26 +315,50 @@ function hl(code) {
     .replace(/\b(\d+\.?\d*)\b/g, '<span class="n">$1</span>');
 }
 function md(text) {
+  // split on ``` fences: single capture group => array alternates
+  // [content, cap, content, cap, ...]. Content lives at even indices; every
+  // OTHER content block (indices 2,6,10 => (i/2) odd) is a fenced code block,
+  // whose language is the preceding capture parts[i-1].
   const parts = String(text).split(/```(\w*)\n?/);
-  let html = "", lang = "";
+  let html = "";
   for (let i = 0; i < parts.length; i++) {
-    if (i % 3 === 1) { lang = parts[i]; }
-    else if (i % 3 === 2) {
+    if (i % 2 === 1) continue; // capture groups handled alongside their code
+    if ((i / 2) % 2 === 1) {   // fenced code block
+      const lang = parts[i - 1] || "code";
       const id = "cb" + Math.random().toString(36).slice(2, 8);
-      html += `<div class="code"><div class="code-bar"><span>${esc(lang) || "code"}</span><button onclick="copyCode('${id}')">COPY</button></div><pre><code id="${id}">${hl(parts[i].replace(/\n$/, ""))}</code></pre></div>`;
-    } else {
+      html += `<div class="code"><div class="code-bar"><span>${esc(lang)}</span>`
+        + `<button onclick="copyCode('${id}', this)">⧉ COPY</button></div>`
+        + `<pre><code id="${id}">${hl(parts[i].replace(/\n$/, ""))}</code></pre></div>`;
+    } else {                   // prose
       html += esc(parts[i])
         .replace(/`([^`\n]+)`/g, "<code>$1</code>")
         .replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>")
-        .replace(/^### (.+)$/gm, "<b>$1</b>")
-        .replace(/^- (.+)$/gm, "&nbsp;•&nbsp;$1");
+        .replace(/^#{1,4} (.+)$/gm, "<b>$1</b>")
+        .replace(/^\s*[-*] (.+)$/gm, "&nbsp;•&nbsp;$1");
     }
   }
   return html;
 }
-function copyCode(id) {
+function copyCode(id, btn) {
   const el = document.getElementById(id);
-  if (el) navigator.clipboard.writeText(el.textContent);
+  if (!el) return;
+  const text = el.textContent;
+  const flash = () => {
+    if (!btn) return;
+    const original = btn.textContent;
+    btn.textContent = "✓ COPIED";
+    setTimeout(() => { btn.textContent = original; }, 1200);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(flash, () => fallbackCopy(text, flash));
+  } else { fallbackCopy(text, flash); }
+}
+function fallbackCopy(text, done) {
+  const ta = document.createElement("textarea");
+  ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand("copy"); done(); } catch (e) {}
+  document.body.removeChild(ta);
 }
 
 /* ── folder handling ─────────────────────────────────────── */

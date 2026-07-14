@@ -9,6 +9,7 @@ from typing import Any
 from forge.safety.guard import SafetyGuard
 from forge.tools.base import Tool, ToolResult
 from forge.tools.changes import ChangeLedger
+from forge.tools.edit_repair import MatchOutcome, compute_edit
 
 
 class ReadFileTool(Tool):
@@ -118,21 +119,75 @@ class EditFileTool(Tool):
         if not resolved.exists():
             return ToolResult(ok=False, error=f"File not found: {path}")
         content = resolved.read_text(encoding="utf-8-sig", errors="replace")
-        count = content.count(old_string)
-        if count == 0:
+
+        # Self-repairing match: exact, else whitespace-tolerant, else grounded
+        # correction. Kills the "old_string not found" retry death-spiral.
+        result = compute_edit(content, old_string, new_string)
+
+        if result.outcome == MatchOutcome.APPLIED:
+            self._ledger.record_before_write(resolved)
+            resolved.write_text(result.new_content, encoding="utf-8")
+            note = (
+                " (matched despite whitespace differences)"
+                if result.tier == "whitespace"
+                else ""
+            )
+            return ToolResult(ok=True, output=f"Edited {path}.{note}")
+
+        if result.outcome == MatchOutcome.AMBIGUOUS:
             return ToolResult(
                 ok=False,
-                error=f"old_string not found in {path}. Read the file and copy the text exactly.",
+                error=f"old_string matches {result.occurrences} places in {path}; "
+                "include more surrounding lines so it is unique.",
             )
-        if count > 1:
+
+        # NOT_FOUND — ground the model with the file's real text when we found
+        # a close span, instead of letting it retry the same hallucinated string.
+        if result.suggestion is not None:
             return ToolResult(
                 ok=False,
-                error=f"old_string appears {count} times in {path}; include more "
-                "surrounding context so it is unique.",
+                error=f"old_string not found in {path}. The closest ACTUAL text in "
+                f"the file is:\n----- copy this exactly -----\n{result.suggestion}\n"
+                "-----------------------------\nRe-issue edit_file using that exact "
+                "text as old_string.",
             )
-        self._ledger.record_before_write(resolved)
-        resolved.write_text(content.replace(old_string, new_string, 1), encoding="utf-8")
-        return ToolResult(ok=True, output=f"Edited {path}.")
+        return ToolResult(
+            ok=False,
+            error=f"old_string not found in {path} and nothing similar is present. "
+            "Call read_file to see the current content before editing.",
+        )
+
+
+class DeleteFileTool(Tool):
+    name = "delete_file"
+    mutating = True
+    description = (
+        "Delete a file from the repository. The content is backed up first, so "
+        "the deletion is reversible with /undo. Only deletes files, not directories."
+    )
+    parameters: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path relative to the repository root."},
+        },
+        "required": ["path"],
+    }
+
+    def __init__(self, guard: SafetyGuard, ledger: ChangeLedger) -> None:
+        self._guard = guard
+        self._ledger = ledger
+
+    def run(self, path: str) -> ToolResult:
+        resolved = self._guard.check_write_path(path)
+        if not resolved.exists():
+            return ToolResult(ok=False, error=f"File not found: {path}")
+        if resolved.is_dir():
+            return ToolResult(
+                ok=False, error=f"{path} is a directory; delete_file only removes files."
+            )
+        self._ledger.record_before_write(resolved)  # backup for /undo
+        resolved.unlink()
+        return ToolResult(ok=True, output=f"Deleted {path} (recoverable with /undo).")
 
 
 class ListDirTool(Tool):

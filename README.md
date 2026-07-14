@@ -59,9 +59,10 @@ desktop). Pick a project folder to give Forge access, then just talk:
   memory**: lessons from similar past runs are recalled and injected so known
   mistakes aren't repeated.
 - **Coder** works like Claude Code: it calls tools in a loop — `read_file`,
-  `edit_file`, `write_file`, `grep`, `find_files`, `list_dir`, `run_command`, `git`,
-  plus code intelligence (`find_symbol`, `who_imports`) and hybrid retrieval
-  (`search_code`) — reading code before changing it and making minimal targeted edits.
+  `edit_file`, `write_file`, `delete_file`, `grep`, `find_files`, `list_dir`,
+  `run_command`, `git`, plus code intelligence (`find_symbol`, `who_imports`),
+  hybrid retrieval (`search_code`), and web docs (`fetch_url`) — reading code
+  before changing it and making minimal targeted edits.
 - **Reviewer** is independent from the coder. It judges the *actual unified diff* and
   the results of your `--check` commands, then approves or returns concrete issues
   that are fed back to the coder for another attempt (up to `FORGE_MAX_REVIEW_CYCLES`).
