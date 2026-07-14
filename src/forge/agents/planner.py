@@ -57,11 +57,16 @@ class Planner:
         self._max_tasks = max_tasks
         self.usage = Usage()
 
-    def plan(self, request: str, repo_summary: str) -> Plan:
+    def plan(self, request: str, repo_summary: str, lessons: str = "") -> Plan:
         self._recorder.event(self.name, "planning_started", message=request)
-        user_message = (
-            f"## User request\n{request}\n\n## Repository overview\n{repo_summary}"
-        )
+        sections = [f"## User request\n{request}"]
+        if lessons:
+            sections.append(
+                "## Lessons from similar past runs (avoid repeating these mistakes)\n"
+                + lessons
+            )
+        sections.append(f"## Repository overview\n{repo_summary}")
+        user_message = "\n\n".join(sections)
         plan = structured_call(
             self._llm, PLANNER_SYSTEM, user_message, Plan, usage=self.usage
         )

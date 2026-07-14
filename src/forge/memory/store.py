@@ -29,6 +29,15 @@ CREATE TABLE IF NOT EXISTS events (
     payload  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_events_run ON events(run_id);
+CREATE TABLE IF NOT EXISTS lessons (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    run_id     TEXT NOT NULL,
+    ts         TEXT NOT NULL,
+    request    TEXT NOT NULL,
+    task_title TEXT NOT NULL,
+    status     TEXT NOT NULL,
+    issues     TEXT NOT NULL
+);
 """
 
 
@@ -91,6 +100,39 @@ class MemoryStore:
         ).fetchall()
         return [
             {"ts": row[0], "agent": row[1], "kind": row[2], "payload": json.loads(row[3])}
+            for row in rows
+        ]
+
+    def add_lesson(
+        self,
+        run_id: str,
+        request: str,
+        task_title: str,
+        status: str,
+        issues: list[str],
+    ) -> None:
+        self._connection.execute(
+            "INSERT INTO lessons (run_id, ts, request, task_title, status, issues) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (run_id, _now(), request, task_title, status, json.dumps(issues)),
+        )
+        self._connection.commit()
+
+    def lessons(self, limit: int = 200) -> list[dict[str, Any]]:
+        rows = self._connection.execute(
+            "SELECT ts, run_id, request, task_title, status, issues "
+            "FROM lessons ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            {
+                "ts": row[0],
+                "run_id": row[1],
+                "request": row[2],
+                "task_title": row[3],
+                "status": row[4],
+                "issues": json.loads(row[5]),
+            }
             for row in rows
         ]
 

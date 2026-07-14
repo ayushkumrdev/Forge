@@ -20,6 +20,7 @@ from forge.agents.planner import Plan, Planner, PlanTask
 from forge.agents.reviewer import Review, Reviewer
 from forge.config import ForgeSettings
 from forge.llm.base import LLMClient, Usage
+from forge.memory.service import ExecutionMemory
 from forge.memory.store import MemoryStore
 from forge.repo.scanner import RepoScanner
 from forge.retrieval.embeddings import OllamaEmbedder
@@ -77,6 +78,7 @@ class ExecutionLoop:
         self.check_commands = check_commands or []
 
         self._llm = llm
+        self._memory = ExecutionMemory(store) if store is not None else None
         self._guard = SafetyGuard(self.workspace)
         self.ledger = ChangeLedger(self.workspace, self.run_id)
         self._registry = self._build_registry()
@@ -128,13 +130,27 @@ class ExecutionLoop:
             self._registry.register(SearchCodeTool(engine))
             self.recorder.event("orchestrator", "retrieval_ready", chunks=chunk_count)
 
-            plan = self.planner.plan(request, repo_summary)
+            lessons = ""
+            if self._memory is not None:
+                lessons = ExecutionMemory.render(self._memory.lessons_for(request))
+                if lessons:
+                    self.recorder.event("orchestrator", "lessons_recalled")
+
+            plan = self.planner.plan(request, repo_summary, lessons)
             report.plan_summary = plan.summary
             report.usage.add(self.planner.usage)
 
             for task in plan.tasks:
                 result = self._execute_task(task, plan, repo_summary, report.usage)
                 report.task_results.append(result)
+                if self._memory is not None:
+                    self._memory.record_task(
+                        self.run_id,
+                        request,
+                        task.title,
+                        result.status,
+                        result.review.issues if result.review else [],
+                    )
                 if result.status != "approved":
                     # later tasks likely depend on this one; don't build on a
                     # change the reviewer refused to approve

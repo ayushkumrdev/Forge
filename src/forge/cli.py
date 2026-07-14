@@ -174,6 +174,28 @@ def run(
 
 
 @app.command()
+def memory(
+    repo: Path = typer.Option(Path("."), help="Target repository."),
+    limit: int = typer.Option(20, help="Number of lessons to show."),
+) -> None:
+    """Show lessons Forge has learned from past runs on this repository."""
+    store = MemoryStore(repo.resolve())
+    lessons = store.lessons(limit)
+    if not lessons:
+        console.print("No lessons recorded yet.")
+        return
+    table = Table("when", "task", "status", "issues")
+    for lesson in lessons:
+        table.add_row(
+            lesson["ts"][:19],
+            lesson["task_title"][:50],
+            lesson["status"],
+            "\n".join(lesson["issues"][:3]) or "-",
+        )
+    console.print(table)
+
+
+@app.command()
 def history(
     repo: Path = typer.Option(Path("."), help="Target repository."),
     limit: int = typer.Option(10, help="Number of runs to show."),
