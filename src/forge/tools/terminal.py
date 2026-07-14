@@ -1,0 +1,65 @@
+"""Terminal tool: runs shell commands inside the workspace with a timeout,
+after the safety guard has vetoed destructive patterns."""
+
+from __future__ import annotations
+
+import subprocess
+from pathlib import Path
+from typing import Any
+
+from forge.safety.guard import SafetyGuard
+from forge.tools.base import Tool, ToolResult
+
+
+class RunCommandTool(Tool):
+    name = "run_command"
+    description = (
+        "Run a shell command in the repository root (e.g. tests, linters, "
+        "build steps). Returns exit code, stdout and stderr. Destructive "
+        "commands are blocked."
+    )
+    parameters: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "command": {"type": "string", "description": "The shell command to run."},
+            "timeout_s": {
+                "type": "number",
+                "description": "Seconds before the command is killed (default 300).",
+            },
+        },
+        "required": ["command"],
+    }
+
+    def __init__(
+        self, guard: SafetyGuard, workspace: Path, default_timeout_s: float = 300.0
+    ) -> None:
+        self._guard = guard
+        self._workspace = workspace
+        self._default_timeout_s = default_timeout_s
+
+    def run(self, command: str, timeout_s: float | None = None) -> ToolResult:
+        self._guard.check_command(command)
+        timeout = min(timeout_s or self._default_timeout_s, 600.0)
+        try:
+            completed = subprocess.run(
+                command,
+                shell=True,
+                cwd=self._workspace,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return ToolResult(ok=False, error=f"Command timed out after {timeout:.0f}s: {command}")
+
+        parts = [f"exit code: {completed.returncode}"]
+        if completed.stdout:
+            parts.append(f"stdout:\n{completed.stdout.rstrip()}")
+        if completed.stderr:
+            parts.append(f"stderr:\n{completed.stderr.rstrip()}")
+        output = "\n".join(parts)
+        # A non-zero exit is still useful information for the agent, so ok=True;
+        # the exit code is in the output for it to reason about.
+        return ToolResult(ok=True, output=output)
