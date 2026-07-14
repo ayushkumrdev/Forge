@@ -28,3 +28,8 @@ class ForgeSettings(BaseSettings):
     # Repository scanning
     max_tree_entries: int = 400
     max_summary_chars: int = 12_000
+
+    # Retrieval — embedding model is optional; empty string disables dense
+    # retrieval and the engine runs BM25-only (e.g. "nomic-embed-text")
+    embedding_model: str = ""
+    retrieval_top_k: int = 5

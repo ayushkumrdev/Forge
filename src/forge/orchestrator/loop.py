@@ -22,6 +22,8 @@ from forge.config import ForgeSettings
 from forge.llm.base import LLMClient, Usage
 from forge.memory.store import MemoryStore
 from forge.repo.scanner import RepoScanner
+from forge.retrieval.embeddings import OllamaEmbedder
+from forge.retrieval.engine import RetrievalEngine
 from forge.safety.guard import SafetyGuard
 from forge.telemetry import Recorder
 from forge.tools.base import ToolRegistry
@@ -29,6 +31,7 @@ from forge.tools.changes import ChangeLedger
 from forge.tools.code_intel import FindSymbolTool, WhoImportsTool
 from forge.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
 from forge.tools.git_tool import GitTool
+from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import RunCommandTool
 
@@ -117,9 +120,13 @@ class ExecutionLoop:
             self.recorder.event(
                 "orchestrator", "repo_scanned", files=len(snapshot.files)
             )
-            # code-intelligence tools need the fresh snapshot
+            # code-intelligence and retrieval tools need the fresh snapshot
             self._registry.register(FindSymbolTool(snapshot))
             self._registry.register(WhoImportsTool(snapshot))
+            engine = RetrievalEngine(self.workspace, embedder=self._embedder())
+            chunk_count = engine.build(snapshot)
+            self._registry.register(SearchCodeTool(engine))
+            self.recorder.event("orchestrator", "retrieval_ready", chunks=chunk_count)
 
             plan = self.planner.plan(request, repo_summary)
             report.plan_summary = plan.summary
@@ -197,6 +204,16 @@ class ExecutionLoop:
             review=review,
             coder_summary=outcome.final_text if outcome else "",
         )
+
+    def _embedder(self) -> OllamaEmbedder | None:
+        """Dense retrieval is optional: only when a model is configured AND
+        actually pulled in Ollama; otherwise BM25-only, silently."""
+        if not self.settings.embedding_model:
+            return None
+        embedder = OllamaEmbedder(
+            model=self.settings.embedding_model, host=self.settings.ollama_host
+        )
+        return embedder if embedder.available() else None
 
     def _run_checks(self) -> str:
         results: list[str] = []
