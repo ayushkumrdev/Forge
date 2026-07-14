@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "forge-dashboard",
+      "runtimeExecutable": ".venv\\Scripts\\forge.exe",
+      "runtimeArgs": ["serve", "--repo", ".", "--port", "8321"],
+      "port": 8321
+    }
+  ]
+}

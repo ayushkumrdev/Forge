@@ -174,6 +174,24 @@ def run(
 
 
 @app.command()
+def serve(
+    repo: Path = typer.Option(Path("."), help="Target repository."),
+    host: str = typer.Option("127.0.0.1", help="Bind address."),
+    port: int = typer.Option(8321, help="Port for the API + dashboard."),
+    model: Optional[str] = typer.Option(None, help="Override the Ollama model."),
+) -> None:
+    """Start the Forge API server and web dashboard."""
+    import uvicorn
+
+    from forge.server.app import create_app
+
+    settings = _settings(model)
+    workspace = repo.resolve()
+    console.print(f"Forge dashboard: [bold]http://{host}:{port}[/bold]  (repo: {workspace})")
+    uvicorn.run(create_app(workspace, settings), host=host, port=port, log_level="warning")
+
+
+@app.command()
 def memory(
     repo: Path = typer.Option(Path("."), help="Target repository."),
     limit: int = typer.Option(20, help="Number of lessons to show."),
