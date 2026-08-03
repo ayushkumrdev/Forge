@@ -101,6 +101,18 @@ Small local models drift; Forge corrects them with reality, not prompting:
   dense embeddings via Ollama (`FORGE_EMBEDDING_MODEL=nomic-embed-text`), fused
   with reciprocal-rank fusion.
 
+## GitHub intelligence
+
+Point Forge at any GitHub project — no clone needed to understand it:
+
+- `github_repo` pulls a repository's metadata, README, and full file tree in
+  one call — an instant architectural picture.
+- `github_file` reads any source file from it (branch/tag/commit selectable).
+- To **modify** a GitHub project, Forge analyzes it, clones it into the
+  workspace with git, then edits locally through the normal safe tool set.
+- Works unauthenticated (60 req/h); set `FORGE_GITHUB_TOKEN` for 5000/h and
+  private repositories.
+
 ## Dashboard
 
 ```powershell
@@ -158,6 +170,7 @@ Everything is overridable via environment variables (or a `.env` file):
 | `FORGE_MAX_REVIEW_CYCLES` | `3` | Code→review iterations per task |
 | `FORGE_COMMAND_TIMEOUT_S` | `300` | Timeout for each shell command |
 | `FORGE_SYNTAX_GATE` | `1` | Parse-verify every write/edit before it lands |
+| `FORGE_GITHUB_TOKEN` | (empty) | GitHub token for higher API limits + private repos |
 
 ## Project layout
 

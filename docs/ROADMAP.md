@@ -142,13 +142,28 @@ changing files) with enforcement, not hope:
   repository are annotated "(new file — does not exist yet)" so the coder
   creates deliberately instead of trusting a hallucinated path.
 
-## Milestone 13 — Execution isolation & scale
+## ✅ Milestone 13 — GitHub intelligence + professional UI
+- **github_repo / github_file tools** (`tools/github.py`): analyze any GitHub
+  repository without cloning — metadata, README, full file tree, then read
+  individual files (branch/tag/commit refs). Friendly rate-limit and 404
+  messages; `FORGE_GITHUB_TOKEN` unlocks 5000 req/h + private repos. The
+  prompt teaches the analyze → clone into workspace → edit-locally workflow.
+  Live-verified against the real GitHub API.
+- **UI redesign** (`server/static/app.html`): the desktop app moved from
+  neon-ember hacker styling to a professional, Claude-grade design system —
+  warm charcoal palette (#262624 / #1f1e1b), terracotta accent (#d97757),
+  Charter serif brand ("✳ Forge"), flat surfaces with 1px borders (no
+  gradients/glows/grain), circular send button, refined tool cards, code
+  blocks, modals, and a calmer welcome screen. All JS behavior (streaming,
+  approvals, sessions, diff viewer) unchanged; browser-verified.
+
+## Milestone 14 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 14 — More agents & evaluation
+## Milestone 15 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness

@@ -41,5 +41,9 @@ class ForgeSettings(BaseSettings):
     embedding_model: str = ""
     retrieval_top_k: int = 5
 
+    # GitHub — optional token raises API limits (60/h -> 5000/h) and unlocks
+    # private repositories for the github_repo / github_file tools
+    github_token: str = ""
+
     # Chat — history length that triggers LLM compaction of older turns
     chat_compact_threshold: int = 30

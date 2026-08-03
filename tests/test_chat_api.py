@@ -292,5 +292,5 @@ def test_app_page_served(workspace):
     scripts, factory = _llm_scripts()
     response = _client(workspace, factory).get("/app")
     assert response.status_code == 200
-    assert "FORGE" in response.text
+    assert "Forge" in response.text
     assert "pick_folder" in response.text

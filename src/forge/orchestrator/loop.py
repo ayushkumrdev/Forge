@@ -39,6 +39,7 @@ from forge.tools.filesystem import (
     WriteFileTool,
 )
 from forge.tools.git_tool import GitTool
+from forge.tools.github import GitHubFileTool, GitHubRepoTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
@@ -138,6 +139,8 @@ class ExecutionLoop:
             GlobTool(self.workspace),
             GitTool(self.workspace),
             FetchUrlTool(),
+            GitHubRepoTool(self.settings.github_token),
+            GitHubFileTool(self.settings.github_token),
         ]
         if os.name == "nt":
             tools.append(
