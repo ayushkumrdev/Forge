@@ -41,6 +41,7 @@ from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
 from forge.tools.vision import IMAGE_EXTENSIONS, ReadImageTool
 from forge.tools.web import FetchUrlTool, WebSearchTool
+from forge.verify.ladder import Ladder
 
 CHAT_SYSTEM = """You are Forge, an elite autonomous AI software engineer running \
 locally on the user's machine with FULL tool access to their repository. You do \
@@ -309,14 +310,22 @@ class ChatSession:
         engine = RetrievalEngine(self.workspace)
         engine.build(snapshot)
         self._engine = engine
+        ladder = Ladder(
+            self.workspace,
+            resolution=self.settings.gate_resolution,
+            types=self.settings.gate_types,
+        )
         tools = [
             ReadFileTool(self._guard),
-            WriteFileTool(self._guard, self.ledger, self.settings.syntax_gate),
+            WriteFileTool(
+                self._guard, self.ledger, self.settings.syntax_gate, ladder=ladder
+            ),
             EditFileTool(
                 self._guard,
                 self.ledger,
                 self.settings.syntax_gate,
                 self.settings.gate_edit_repair,
+                ladder=ladder,
             ),
             DeleteFileTool(self._guard, self.ledger),
             ListDirTool(self._guard),

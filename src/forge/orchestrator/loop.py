@@ -44,6 +44,7 @@ from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
 from forge.tools.web import FetchUrlTool, WebSearchTool
+from forge.verify.ladder import Ladder
 
 
 def ground_target_files(plan: Plan, known_files: set[str]) -> None:
@@ -126,14 +127,22 @@ class ExecutionLoop:
         self.reviewer = Reviewer(llm, self.recorder)
 
     def _build_registry(self) -> ToolRegistry:
+        ladder = Ladder(
+            self.workspace,
+            resolution=self.settings.gate_resolution,
+            types=self.settings.gate_types,
+        )
         tools = [
             ReadFileTool(self._guard),
-            WriteFileTool(self._guard, self.ledger, self.settings.syntax_gate),
+            WriteFileTool(
+                self._guard, self.ledger, self.settings.syntax_gate, ladder=ladder
+            ),
             EditFileTool(
                 self._guard,
                 self.ledger,
                 self.settings.syntax_gate,
                 self.settings.gate_edit_repair,
+                ladder=ladder,
             ),
             DeleteFileTool(self._guard, self.ledger),
             ListDirTool(self._guard),

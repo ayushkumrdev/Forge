@@ -4,6 +4,7 @@ match so the model can never clobber a file it has not actually read."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from forge.safety.guard import SafetyGuard
@@ -11,6 +12,28 @@ from forge.tools.base import Tool, ToolResult
 from forge.tools.changes import ChangeLedger
 from forge.tools.edit_repair import EditResult, MatchOutcome, compute_edit
 from forge.tools.syntax_check import gate_edit
+from forge.verify.ladder import Ladder
+
+
+def _verify(
+    ladder: Ladder | None,
+    syntax_gate: bool,
+    resolved: Path,
+    original: str | None,
+    new_content: str,
+) -> str | None:
+    """Run the strongest verification configured for this tool. Returns a
+    reason to refuse the write, or None to allow it."""
+    if ladder is not None:
+        verdict = ladder.check(resolved, original, new_content)
+        if not verdict.ok:
+            return f"the {verdict.failed_rung} check failed: {verdict.diagnostic}."
+        return None
+    if syntax_gate:
+        error = gate_edit(resolved.name, original, new_content)
+        if error:
+            return f"this content has a syntax error ({error})."
+    return None
 
 
 def _exact_only_edit(content: str, old_string: str, new_string: str) -> EditResult:
@@ -88,27 +111,34 @@ class WriteFileTool(Tool):
     }
 
     def __init__(
-        self, guard: SafetyGuard, ledger: ChangeLedger, syntax_gate: bool = True
+        self,
+        guard: SafetyGuard,
+        ledger: ChangeLedger,
+        syntax_gate: bool = True,
+        ladder: Ladder | None = None,
     ) -> None:
         self._guard = guard
         self._ledger = ledger
         self._syntax_gate = syntax_gate
+        self._ladder = ladder
 
     def run(self, path: str, content: str) -> ToolResult:
         resolved = self._guard.check_write_path(path)
-        if self._syntax_gate:
+        if self._syntax_gate or self._ladder is not None:
             original = (
                 resolved.read_text(encoding="utf-8-sig", errors="replace")
                 if resolved.is_file()
                 else None
             )
-            gate = gate_edit(resolved.name, original, content)
-            if gate:
+            refusal = _verify(
+                self._ladder, self._syntax_gate, resolved, original, content
+            )
+            if refusal:
                 return ToolResult(
                     ok=False,
-                    error=f"Rejected — this content has a syntax error ({gate}). "
-                    f"Nothing was written to {path}. Fix the syntax and call "
-                    "write_file again with the corrected complete content.",
+                    error=f"Rejected — {refusal} Nothing was written to {path}. "
+                    "Fix it and call write_file again with the corrected "
+                    "complete content.",
                 )
         self._ledger.record_before_write(resolved)
         resolved.parent.mkdir(parents=True, exist_ok=True)
@@ -142,11 +172,13 @@ class EditFileTool(Tool):
         ledger: ChangeLedger,
         syntax_gate: bool = True,
         edit_repair: bool = True,
+        ladder: Ladder | None = None,
     ) -> None:
         self._guard = guard
         self._ledger = ledger
         self._syntax_gate = syntax_gate
         self._edit_repair = edit_repair
+        self._ladder = ladder
 
     def run(self, path: str, old_string: str, new_string: str) -> ToolResult:
         resolved = self._guard.check_write_path(path)
@@ -171,15 +203,15 @@ class EditFileTool(Tool):
         )
 
         if result.outcome == MatchOutcome.APPLIED:
-            if self._syntax_gate:
-                gate = gate_edit(resolved.name, content, result.new_content)
-                if gate:
-                    return ToolResult(
-                        ok=False,
-                        error=f"Rejected — this edit would introduce a syntax error "
-                        f"({gate}). The file was NOT modified. Fix new_string and "
-                        "call edit_file again.",
-                    )
+            refusal = _verify(
+                self._ladder, self._syntax_gate, resolved, content, result.new_content
+            )
+            if refusal:
+                return ToolResult(
+                    ok=False,
+                    error=f"Rejected — {refusal} The file was NOT modified. "
+                    "Fix new_string and call edit_file again.",
+                )
             self._ledger.record_before_write(resolved)
             resolved.write_text(result.new_content, encoding="utf-8")
             note = (

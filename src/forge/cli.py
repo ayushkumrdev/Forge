@@ -448,5 +448,85 @@ def evaluate(
     console.print(f"[dim]report written to {destination}[/dim]")
 
 
+@app.command()
+def sweep(
+    tier: Optional[int] = typer.Option(None, help="Only run tier 1, 2 or 3."),
+    model: Optional[str] = typer.Option(None, help="Model under test."),
+    effort: str = typer.Option("smart", help="fast | smart | genius."),
+    seeds: int = typer.Option(3, help="Repeats per task per configuration."),
+    ablations: Optional[str] = typer.Option(
+        None, help="Comma-separated ablation names (default: all)."
+    ),
+    out: Optional[Path] = typer.Option(None, help="Where to write the sweep JSON."),
+) -> None:
+    """Run the benchmark under every gate configuration — the ablation table."""
+    import json as _json
+
+    from forge.evals.runner import ABLATIONS, run_suite
+
+    settings = _settings(model)
+    settings.effort = effort
+    names = (
+        [a.strip() for a in ablations.split(",")] if ablations else list(ABLATIONS)
+    )
+    unknown = [a for a in names if a not in ABLATIONS]
+    if unknown:
+        console.print(f"[red]Unknown ablation(s):[/red] {', '.join(unknown)}")
+        raise typer.Exit(2)
+
+    console.print(
+        Panel(
+            f"model [bold]{settings.model}[/bold] · effort [bold]{effort}[/bold] · "
+            f"seeds [bold]{seeds}[/bold] · configs [bold]{len(names)}[/bold]",
+            title="SWE-micro ablation sweep",
+        )
+    )
+
+    summaries: dict[str, dict] = {}
+    for name in names:
+        console.print(f"\n[bold]— {name} —[/bold]")
+        report = run_suite(
+            llm_factory=lambda: _client(settings),
+            settings=settings,
+            tier=tier,
+            seeds=seeds,
+            ablation=name,
+            on_result=lambda r: console.print(
+                f"  {'PASS' if r.solved else 'FAIL'} {r.task_id} "
+                f"(T{r.tier}) {r.duration_s}s"
+            ),
+        )
+        summaries[name] = report.summary()
+        console.print(f"  [dim]TSR {report.task_success_rate() * 100:.1f}%[/dim]")
+
+    table = Table("config", "TSR", "ADT", "FVR", "GER", "WCR", "tools", "time")
+    for name, summary in summaries.items():
+        metrics = summary["metrics"]
+
+        def show(field: str, m=metrics) -> str:
+            value = m[field]["mean"]
+            return "n/a" if value is None else f"{value * 100:.0f}%"
+
+        table.add_row(
+            name,
+            f"{summary['task_success_rate'] * 100:.1f}%",
+            show("act_dont_tell"),
+            show("false_verification"),
+            show("grounded_edit"),
+            show("wasted_cycle"),
+            f"{metrics['totals']['tool_calls']}"
+            f" ({metrics['totals']['tool_failures']}✗)",
+            f"{summary['duration_s']:.0f}s",
+        )
+    console.print(table)
+
+    destination = out or Path(".forge") / "evals" / "sweep.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        _json.dumps(summaries, indent=2, default=str), encoding="utf-8"
+    )
+    console.print(f"[dim]sweep written to {destination}[/dim]")
+
+
 if __name__ == "__main__":
     app()

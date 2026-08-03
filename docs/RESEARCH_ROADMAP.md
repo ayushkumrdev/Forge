@@ -195,6 +195,29 @@ the contribution list, not the bug list.
 Ordered by novelty × feasibility ÷ risk. Each: what, why novel, how, measure.
 
 ### C1 — The Verification Ladder (Milestone 18) ★ core of the paper
+**STATUS: L1–L3 shipped** (`src/forge/verify/`). `Ladder.check(path, original,
+new)` climbs syntax → resolution → types, stops at the first failure, and
+returns that rung's own diagnostic. Wired into `write_file` and `edit_file`;
+`FORGE_GATE_RESOLUTION=0` / `no-resolution` ablation isolate it.
+
+**L2 (resolution) is the novel rung and it works**: a file can parse
+perfectly and still import something that does not exist — the single most
+characteristic code-model hallucination, invisible to every cheaper check.
+L2 resolves each import against the stdlib, installed distributions, and the
+repository, and for repo modules verifies the *imported names* exist,
+offering a `did you mean` when a near-match is found. Verified end-to-end:
+`from utils import make_magic` is refused with
+`'utils' does not define 'make_magic'`, nothing is written, while
+`from utils import helper` passes.
+
+Two invariants keep it from trapping the agent (both inherited from the
+syntax gate, both tested): only NEW failures block, and a failure returns the
+rung's diagnostic rather than a generic refusal. Line-number drift is
+normalised so a pre-existing bad import stays pre-existing after it moves.
+
+Remaining: L4 (impacted-test selection via the import graph) and L5 (reviewer)
+at the orchestrator level; measure TSR/HIR against rung depth.
+
 Formalize the scattered gates into an explicit, ordered, cost-aware ladder
 every mutation climbs before it counts as progress:
 

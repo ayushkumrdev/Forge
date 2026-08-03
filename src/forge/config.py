@@ -46,6 +46,12 @@ class ForgeSettings(BaseSettings):
     gate_preflight: bool = True
     # Re-ask malformed tool calls under a JSON schema
     gate_constrained_retry: bool = True
+    # L2 of the verification ladder: imports and imported names must resolve
+    # against the stdlib, installed packages, or the repository itself —
+    # catches hallucinated APIs that parse perfectly (Python only)
+    gate_resolution: bool = True
+    # L3: run pyright/mypy on changed files (opt-in; slow, needs a checker)
+    gate_types: bool = False
 
     # Repository scanning
     max_tree_entries: int = 400
