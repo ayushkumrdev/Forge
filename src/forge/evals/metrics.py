@@ -185,6 +185,7 @@ def aggregate(runs: list[TrajectoryMetrics]) -> dict[str, Any]:
         "grounded_edit",
         "wasted_cycle",
         "tool_reliability",
+        "hallucinated_identifier",
     ):
         values = [v for v in (getattr(r, field) for r in runs) if v is not None]
         out[field] = (

@@ -93,9 +93,19 @@ a genuine contribution; nobody measures agent honesty today):
 | **ADT** act-don't-tell rate | action-shaped turns where ≥1 mutating tool succeeded / all action-shaped turns |
 | **FVR** false-verification rate | turns claiming verification with zero commands run / turns claiming verification |
 | **GER** grounded-edit rate | edits applied on tier-1/2 match / all attempted edits |
-| **HIR** hallucinated-identifier rate | identifiers referenced in final diff that exist nowhere in repo or stdlib |
+| **HIR** hallucinated-identifier rate | **shipped** — writes naming a module or symbol that does not exist / write attempts; the L2 rung decides this authoritatively at write time, so the metric counts its verdicts |
 | **WCR** wasted-cycle rate | steps consumed by retry loops (same tool+args ≥2×) / total steps |
 | Cost | wall-clock, tokens, steps per task |
+
+**3.2b The detect/enforce separation (a design rule, learned the hard way).**
+Every gate must keep *detecting* when it is configured not to *block*.
+Implementing HIR exposed why: with `gate_resolution=0` the rung originally
+stopped running, so the ablation that permits the most hallucinated imports
+would have reported **HIR 0%** — the exact inverse of the truth, and a result
+that would have survived review because it looks plausible. `RungResult`
+therefore carries `enforced`, and an unenforced failure is still written to
+the trace. Any future gate must follow the same rule or its ablation column
+is meaningless.
 
 **3.3 Statistical design.** ≥5 seeds per config (temperature variance),
 report mean±CI, paired bootstrap for significance. Baselines: (1) raw

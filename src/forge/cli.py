@@ -499,7 +499,16 @@ def sweep(
         summaries[name] = report.summary()
         console.print(f"  [dim]TSR {report.task_success_rate() * 100:.1f}%[/dim]")
 
-    table = Table("config", "TSR", "ADT", "FVR", "GER", "WCR", "tools", "time")
+    # Persist BEFORE rendering: hours of runs must never be lost to a
+    # console encoding error (a Windows cp1252 crash did exactly that once).
+    destination = out or Path(".forge") / "evals" / "sweep.json"
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        _json.dumps(summaries, indent=2, default=str), encoding="utf-8"
+    )
+    console.print(f"[dim]sweep written to {destination}[/dim]")
+
+    table = Table("config", "TSR", "ADT", "FVR", "GER", "HIR", "WCR", "tools", "time")
     for name, summary in summaries.items():
         metrics = summary["metrics"]
 
@@ -513,19 +522,13 @@ def sweep(
             show("act_dont_tell"),
             show("false_verification"),
             show("grounded_edit"),
+            show("hallucinated_identifier"),
             show("wasted_cycle"),
             f"{metrics['totals']['tool_calls']}"
-            f" ({metrics['totals']['tool_failures']}✗)",
+            f" ({metrics['totals']['tool_failures']} failed)",
             f"{summary['duration_s']:.0f}s",
         )
     console.print(table)
-
-    destination = out or Path(".forge") / "evals" / "sweep.json"
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        _json.dumps(summaries, indent=2, default=str), encoding="utf-8"
-    )
-    console.print(f"[dim]sweep written to {destination}[/dim]")
 
 
 if __name__ == "__main__":
