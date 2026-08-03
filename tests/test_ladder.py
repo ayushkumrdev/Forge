@@ -160,13 +160,26 @@ def test_line_shift_does_not_resurrect_a_pre_existing_problem(tmp_path):
     assert verdict.ok
 
 
-def test_resolution_can_be_disabled(tmp_path):
+def test_disabled_resolution_still_detects_but_does_not_block(tmp_path):
+    """Disabling a rung must stop it BLOCKING, not stop it MEASURING —
+    otherwise an ablation cannot report the hallucinations it now allows."""
     repo = _repo(tmp_path)
     verdict = Ladder(repo, resolution=False).check(
         repo / "m.py", None, "from utils import ghost\n"
     )
+    assert verdict.ok  # the write is allowed through
+    unenforced = verdict.unenforced_failures
+    assert [r.rung for r in unenforced] == [RESOLUTION]
+    assert "does not define 'ghost'" in unenforced[0].diagnostic
+
+
+def test_disabled_resolution_reports_nothing_when_code_is_clean(tmp_path):
+    repo = _repo(tmp_path)
+    verdict = Ladder(repo, resolution=False).check(
+        repo / "m.py", None, "from utils import helper\n"
+    )
     assert verdict.ok
-    assert any(r.rung == RESOLUTION and r.skipped for r in verdict.results)
+    assert verdict.unenforced_failures == []
 
 
 def test_types_rung_skipped_by_default(tmp_path):
@@ -232,11 +245,43 @@ def test_edit_file_refuses_an_edit_that_adds_a_bad_import(tmp_path):
     assert (repo / "mod.py").read_text(encoding="utf-8") == "x = 1\n"  # untouched
 
 
-def test_resolution_gate_can_be_ablated(tmp_path):
+def test_resolution_gate_can_be_ablated_but_still_measures(tmp_path):
+    """Ablating the rung must not blind the metrics: the write lands, and the
+    detection is reported so HIR stays comparable across configurations."""
     repo = _repo(tmp_path)
     session = _session(repo, gate_resolution=False)
     result = session.registry.execute(
         "write_file", {"path": "main.py", "content": "from utils import make_magic\n"}
     )
-    assert result.ok  # syntax still checked, resolution skipped
+    assert result.ok  # syntax still checked, resolution not enforced
     assert (repo / "main.py").exists()
+    assert "unenforced" in result.output
+    assert "resolution check failed" in result.output
+
+
+def test_hir_counts_hallucinations_in_both_configurations():
+    from forge.evals.metrics import metrics_from_events
+
+    blocked = metrics_from_events([
+        {"kind": "tool_call", "tool": "write_file", "arguments": {"path": "a.py"}},
+        {"kind": "tool_result", "tool": "write_file", "ok": False,
+         "error": "Rejected — the resolution check failed: no such name."},
+    ])
+    allowed = metrics_from_events([
+        {"kind": "tool_call", "tool": "write_file", "arguments": {"path": "a.py"}},
+        {"kind": "tool_result", "tool": "write_file", "ok": True,
+         "output": "Wrote 20 chars to a.py. [unenforced: resolution check failed: x]"},
+    ])
+    assert blocked.hallucinated_identifier == 1.0
+    assert allowed.hallucinated_identifier == 1.0  # same rate, gate off
+
+
+def test_clean_writes_have_zero_hir():
+    from forge.evals.metrics import metrics_from_events
+
+    m = metrics_from_events([
+        {"kind": "tool_call", "tool": "write_file", "arguments": {"path": "a.py"}},
+        {"kind": "tool_result", "tool": "write_file", "ok": True,
+         "output": "Wrote 20 chars to a.py."},
+    ])
+    assert m.hallucinated_identifier == 0.0

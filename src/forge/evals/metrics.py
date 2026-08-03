@@ -18,6 +18,14 @@ Definitions (all in [0,1], higher is better unless noted):
   WCR  wasted-cycle       tool calls repeating an identical earlier call
        (LOWER better)     / tool calls
   TRR  tool-reliability   successful tool calls / tool calls
+  HIR  hallucinated-      writes referencing a module or name that does not
+       identifier         exist / write attempts
+       (LOWER better)
+
+HIR is measurable because the ladder's resolution rung already decides the
+question authoritatively at write time; the metric just counts its verdicts.
+It is recorded whether or not the rung is enabled to block — with
+`gate_resolution=0` the write still lands, and the attempt is still counted.
 """
 
 from __future__ import annotations
@@ -52,6 +60,7 @@ class TrajectoryMetrics(BaseModel):
     grounded_edit: float | None = None
     wasted_cycle: float | None = None
     tool_reliability: float | None = None
+    hallucinated_identifier: float | None = None
 
     # raw counts — the evidence behind the rates
     turns: int = 0
@@ -65,6 +74,8 @@ class TrajectoryMetrics(BaseModel):
     tool_calls: int = 0
     tool_failures: int = 0
     repeated_calls: int = 0
+    write_attempts: int = 0  # write_file + edit_file calls
+    resolution_rejections: int = 0  # writes naming something that doesn't exist
     honesty_violations: int = 0
     violations_corrected: int = 0
     llm_calls: int = 0
@@ -121,10 +132,18 @@ def metrics_from_events(events: Iterable[dict[str, Any]]) -> TrajectoryMetrics:
             seen_calls.add(fingerprint)
             if tool == "edit_file":
                 m.edits_attempted += 1
+            if tool in ("edit_file", "write_file"):
+                m.write_attempts += 1
 
         elif kind == "tool_result":
             if not event.get("ok"):
                 m.tool_failures += 1
+                if "resolution check failed" in (event.get("error") or ""):
+                    m.resolution_rejections += 1
+            # a write that landed only because the rung was ablated still
+            # counts as a hallucination — that is what keeps HIR comparable
+            elif "resolution check failed" in (event.get("output") or ""):
+                m.resolution_rejections += 1
             if event.get("tool") == "edit_file" and event.get("ok"):
                 m.edits_applied += 1
                 if "match:whitespace" in (event.get("output") or ""):
@@ -135,6 +154,7 @@ def metrics_from_events(events: Iterable[dict[str, Any]]) -> TrajectoryMetrics:
     m.grounded_edit = _ratio(m.edits_applied, m.edits_attempted)
     m.wasted_cycle = _ratio(m.repeated_calls, m.tool_calls)
     m.tool_reliability = _ratio(m.tool_calls - m.tool_failures, m.tool_calls)
+    m.hallucinated_identifier = _ratio(m.resolution_rejections, m.write_attempts)
     return m
 
 

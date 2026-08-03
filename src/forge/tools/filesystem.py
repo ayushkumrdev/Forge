@@ -21,19 +21,26 @@ def _verify(
     resolved: Path,
     original: str | None,
     new_content: str,
-) -> str | None:
-    """Run the strongest verification configured for this tool. Returns a
-    reason to refuse the write, or None to allow it."""
+) -> tuple[str | None, str]:
+    """Run the strongest verification configured for this tool.
+
+    Returns (refusal, advisory). `refusal` is a reason to reject the write;
+    `advisory` reports a problem that was detected but deliberately not
+    enforced, so an ablation still records what it stopped blocking."""
     if ladder is not None:
         verdict = ladder.check(resolved, original, new_content)
         if not verdict.ok:
-            return f"the {verdict.failed_rung} check failed: {verdict.diagnostic}."
-        return None
+            return f"the {verdict.failed_rung} check failed: {verdict.diagnostic}.", ""
+        unenforced = verdict.unenforced_failures
+        if unenforced:
+            detail = "; ".join(f"{r.rung} check failed: {r.diagnostic}" for r in unenforced)
+            return None, f" [unenforced: {detail}]"
+        return None, ""
     if syntax_gate:
         error = gate_edit(resolved.name, original, new_content)
         if error:
-            return f"this content has a syntax error ({error})."
-    return None
+            return f"this content has a syntax error ({error}).", ""
+    return None, ""
 
 
 def _exact_only_edit(content: str, old_string: str, new_string: str) -> EditResult:
@@ -130,7 +137,7 @@ class WriteFileTool(Tool):
                 if resolved.is_file()
                 else None
             )
-            refusal = _verify(
+            refusal, advisory = _verify(
                 self._ladder, self._syntax_gate, resolved, original, content
             )
             if refusal:
@@ -140,10 +147,14 @@ class WriteFileTool(Tool):
                     "Fix it and call write_file again with the corrected "
                     "complete content.",
                 )
+        else:
+            advisory = ""
         self._ledger.record_before_write(resolved)
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(content, encoding="utf-8")
-        return ToolResult(ok=True, output=f"Wrote {len(content)} chars to {path}.")
+        return ToolResult(
+            ok=True, output=f"Wrote {len(content)} chars to {path}.{advisory}"
+        )
 
 
 class EditFileTool(Tool):
@@ -203,7 +214,7 @@ class EditFileTool(Tool):
         )
 
         if result.outcome == MatchOutcome.APPLIED:
-            refusal = _verify(
+            refusal, advisory = _verify(
                 self._ladder, self._syntax_gate, resolved, content, result.new_content
             )
             if refusal:
@@ -221,7 +232,9 @@ class EditFileTool(Tool):
             )
             # the tier is carried in the output so traces reveal HOW the edit
             # landed (exact vs repaired) — the grounded-edit metric reads it
-            return ToolResult(ok=True, output=f"Edited {path} [match:{result.tier}].{note}")
+            return ToolResult(
+                ok=True, output=f"Edited {path} [match:{result.tier}].{note}{advisory}"
+            )
 
         if result.outcome == MatchOutcome.AMBIGUOUS:
             return ToolResult(

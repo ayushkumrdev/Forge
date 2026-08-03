@@ -47,6 +47,7 @@ class RungResult:
     diagnostic: str = ""
     skipped: bool = False
     pre_existing: bool = False  # the failure was already there before the change
+    enforced: bool = True  # False => detected but allowed through (ablation)
 
 
 @dataclass
@@ -60,6 +61,12 @@ class LadderVerdict:
     def highest_passed(self) -> str | None:
         passed = [r.rung for r in self.results if r.passed and not r.skipped]
         return passed[-1] if passed else None
+
+    @property
+    def unenforced_failures(self) -> list[RungResult]:
+        """Rungs that detected a real problem but were configured not to
+        block — the signal an ablation needs to stay measurable."""
+        return [r for r in self.results if not r.passed and not r.enforced]
 
     def summary(self) -> str:
         parts = []
@@ -105,32 +112,34 @@ class Ladder:
         else:
             results.append(RungResult(SYNTAX, passed=True))
 
-        # L2 — resolution
-        if not self.resolution:
-            results.append(RungResult(RESOLUTION, passed=True, skipped=True))
-        else:
-            problems = resolution_errors(path, new_content, self.workspace)
-            if problems:
-                before = (
-                    resolution_errors(path, original, self.workspace)
-                    if original is not None
-                    else []
+        # L2 — resolution. Always evaluated, even when enforcement is off:
+        # an ablation must still measure the hallucinations it stops blocking.
+        problems = resolution_errors(path, new_content, self.workspace)
+        if problems:
+            before = (
+                resolution_errors(path, original, self.workspace)
+                if original is not None
+                else []
+            )
+            new_problems = [p for p in problems if _without_line(p) not in
+                            {_without_line(b) for b in before}]
+            if not new_problems:
+                results.append(
+                    RungResult(RESOLUTION, passed=True, pre_existing=True,
+                               diagnostic="unresolved imports already present")
                 )
-                new_problems = [p for p in problems if _without_line(p) not in
-                                {_without_line(b) for b in before}]
-                if not new_problems:
-                    results.append(
-                        RungResult(RESOLUTION, passed=True, pre_existing=True,
-                                   diagnostic="unresolved imports already present")
-                    )
-                else:
-                    diagnostic = "; ".join(new_problems)
-                    results.append(
-                        RungResult(RESOLUTION, passed=False, diagnostic=diagnostic)
-                    )
-                    return LadderVerdict(False, results, RESOLUTION, diagnostic)
             else:
-                results.append(RungResult(RESOLUTION, passed=True))
+                diagnostic = "; ".join(new_problems)
+                results.append(
+                    RungResult(
+                        RESOLUTION, passed=False, diagnostic=diagnostic,
+                        enforced=self.resolution,
+                    )
+                )
+                if self.resolution:
+                    return LadderVerdict(False, results, RESOLUTION, diagnostic)
+        else:
+            results.append(RungResult(RESOLUTION, passed=True))
 
         # L3 — types (opt-in; skipped when no checker is installed)
         if not self.types:
