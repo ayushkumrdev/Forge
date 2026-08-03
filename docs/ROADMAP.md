@@ -226,13 +226,30 @@ The instrument that turns "it works" into measured claims — see
   arguments** — now repaired (`unescape_literals`), cutting that task from
   16 tool calls to 2 and the suite from 85s to 48s.
 
-## Milestone 18 — Execution isolation & scale
+## ✅ Milestone 18 — Verification ladder (research contribution C1)
+- **`forge.verify.ladder`**: every mutation climbs L1 syntax → L2 resolution
+  → L3 types, cheapest first, stopping at the first failure and returning
+  that rung's own diagnostic (not a generic refusal) so the model recovers
+  instead of retrying blindly.
+- **L2 resolution is the novel rung**: a file can parse perfectly and still
+  import something that doesn't exist — the most characteristic code-model
+  hallucination. Resolves imports against stdlib / installed packages / the
+  repository, and checks imported *names* exist in repo modules, with a
+  "did you mean" for near-misses.
+- Invariants (tested): only NEW failures block, line drift never resurrects
+  a pre-existing problem, unparseable targets are never guessed at.
+- Wired into `write_file` / `edit_file`; `FORGE_GATE_RESOLUTION=0` and the
+  `no-resolution` ablation isolate it. `FORGE_GATE_TYPES=1` enables L3.
+- **`forge sweep`** runs the benchmark under every gate configuration and
+  prints the ablation table.
+
+## Milestone 19 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 19 — More agents & evaluation
+## Milestone 20 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness

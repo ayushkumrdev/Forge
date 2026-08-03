@@ -156,6 +156,32 @@ Point Forge at any GitHub project — no clone needed to understand it:
 - Works unauthenticated (60 req/h); set `FORGE_GITHUB_TOKEN` for 5000/h and
   private repositories.
 
+## The verification ladder
+
+Every change Forge writes climbs an ordered set of checks before it lands —
+cheapest first, stopping at the first failure, and reporting *that* check's
+own diagnostic so the model can actually fix it:
+
+| rung | check | cost |
+| --- | --- | --- |
+| **L1 syntax** | the file parses (ast / JSON / TOML / tree-sitter) | ~10 ms |
+| **L2 resolution** | every import and imported name really exists | ~50 ms |
+| **L3 types** | `pyright`/`mypy` accepts it (`FORGE_GATE_TYPES=1`) | ~seconds |
+
+L2 is the one that catches what nothing else does. This file is *valid
+Python* — and refused:
+
+```python
+from utils import make_magic     # utils.py has no make_magic
+```
+```
+Rejected — the resolution check failed: line 1: 'utils' does not define
+'make_magic' (did you mean 'make_music'?). Nothing was written to main.py.
+```
+
+Only **new** failures block: a file that already had a broken import is
+never blamed for it, so Forge can still work inside a half-finished refactor.
+
 ## Measuring the agent
 
 Forge ships its own benchmark. `forge eval` runs **SWE-micro** — tiered tasks
