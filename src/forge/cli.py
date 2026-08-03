@@ -482,34 +482,49 @@ def sweep(
         )
     )
 
-    summaries: dict[str, dict] = {}
-    for name in names:
-        console.print(f"\n[bold]— {name} —[/bold]")
-        report = run_suite(
-            llm_factory=lambda: _client(settings),
-            settings=settings,
-            tier=tier,
-            seeds=seeds,
-            ablation=name,
-            on_result=lambda r: console.print(
-                f"  {'PASS' if r.solved else 'FAIL'} {r.task_id} "
-                f"(T{r.tier}) {r.duration_s}s"
-            ),
-        )
-        summaries[name] = report.summary()
-        console.print(f"  [dim]TSR {report.task_success_rate() * 100:.1f}%[/dim]")
-
-    # Persist BEFORE rendering: hours of runs must never be lost to a
-    # console encoding error (a Windows cp1252 crash did exactly that once).
     destination = out or Path(".forge") / "evals" / "sweep.json"
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        _json.dumps(summaries, indent=2, default=str), encoding="utf-8"
-    )
+
+    def persist(data: dict) -> None:
+        """Written after every configuration: a sweep can run for hours, and
+        a crash in hour four must not cost the first three."""
+        destination.write_text(_json.dumps(data, indent=2, default=str), encoding="utf-8")
+
+    summaries: dict[str, dict] = {}
+    for index, name in enumerate(names, 1):
+        console.print(f"\n[bold]— {name} —[/bold] [dim]({index}/{len(names)})[/dim]")
+        try:
+            report = run_suite(
+                llm_factory=lambda: _client(settings),
+                settings=settings,
+                tier=tier,
+                seeds=seeds,
+                ablation=name,
+                on_result=lambda r: console.print(
+                    f"  {'PASS' if r.solved else 'FAIL'} {r.task_id} "
+                    f"(T{r.tier}) {r.duration_s}s"
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 — one bad config must not end the sweep
+            console.print(f"  [red]configuration failed: {type(exc).__name__}: {exc}[/red]")
+            summaries[name] = {"error": f"{type(exc).__name__}: {exc}"}
+            persist(summaries)
+            continue
+        summaries[name] = report.summary()
+        persist(summaries)
+        console.print(
+            f"  [dim]TSR {report.task_success_rate() * 100:.1f}% · "
+            f"saved ({index}/{len(names)})[/dim]"
+        )
+
+    persist(summaries)
     console.print(f"[dim]sweep written to {destination}[/dim]")
 
     table = Table("config", "TSR", "ADT", "FVR", "GER", "HIR", "WCR", "tools", "time")
     for name, summary in summaries.items():
+        if "error" in summary:
+            table.add_row(name, "ERROR", *[""] * 7)
+            continue
         metrics = summary["metrics"]
 
         def show(field: str, m=metrics) -> str:
