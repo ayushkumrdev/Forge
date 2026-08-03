@@ -39,6 +39,7 @@ from forge.tools.github import GitHubFileTool, GitHubRepoTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
+from forge.tools.vision import IMAGE_EXTENSIONS, ReadImageTool
 from forge.tools.web import FetchUrlTool, WebSearchTool
 
 CHAT_SYSTEM = """You are Forge, an elite autonomous AI software engineer running \
@@ -104,7 +105,9 @@ find_symbol (find definitions) · who_imports (what depends on a file) ·
 git (status/diff/log/add/commit) · web_search (search the web) ·
 fetch_url (read a web page) ·
 github_repo (analyze any GitHub repository: metadata, README, file tree) ·
-github_file (read one file from a GitHub repository)
+github_file (read one file from a GitHub repository) ·
+read_image (see an image file — screenshot, mockup, diagram — described in
+detail with text transcribed; available when a vision model is configured)
 
 ## GitHub workflow
 - Asked about a GitHub project? github_repo first (architecture + README),
@@ -146,6 +149,13 @@ _PROMISE_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_ACTION_NUDGES = 2
+
+_GENIUS_CHECK = (
+    "Final completeness check: re-read the user's ORIGINAL request at the "
+    "start of this turn. If ANY part of it is not done or not verified, do "
+    "it NOW with tools. If everything is complete and verified, restate "
+    "your final summary."
+)
 
 # system prompt for the optional second model (the "thinker"): it never
 # touches tools — it turns the user's raw message into a precise brief the
@@ -224,6 +234,11 @@ class ChatSession:
             from forge.llm.factory import make_client
 
             self._thinker = make_client(self.settings, model=self.settings.thinker_model)
+        self.effort = (
+            self.settings.effort
+            if self.settings.effort in ("fast", "smart", "genius")
+            else "smart"
+        )
 
         self._guard = SafetyGuard(self.workspace)
         self.ledger = ChangeLedger(self.workspace, session_id)
@@ -278,6 +293,12 @@ class ChatSession:
             tools.append(
                 PowerShellTool(self._guard, self.workspace, self.settings.command_timeout_s)
             )
+        self._vision: ReadImageTool | None = None
+        if self.settings.vision_model:
+            self._vision = ReadImageTool(
+                self._guard, host=self.settings.ollama_host, model=self.settings.vision_model
+            )
+            tools.append(self._vision)
         return ToolRegistry(tools, policy=policy)
 
     # -- conversation ------------------------------------------------------------
@@ -285,7 +306,7 @@ class ChatSession:
     def send(self, user_text: str) -> str:
         """One user turn: run the tool loop until the model answers in text."""
         expanded = self._expand_mentions(user_text)
-        if expanded == user_text:
+        if expanded == user_text and self.effort != "fast":
             # no @file context supplied -> pre-flight retrieval puts the real
             # relevant code in front of the model before it generates
             context = self._engine.preflight(user_text)
@@ -306,7 +327,8 @@ class ChatSession:
         turn_ran_command = False
         corrections = 0
         nudged = False
-        for _step in range(self.settings.max_agent_steps):
+        genius_checked = False
+        for _step in range(self._step_budget()):
             if self._cancelled():
                 return self._finish_stopped()
             if self.on_step is not None:
@@ -367,6 +389,14 @@ class ChatSession:
                     self.history.append(message.model_copy(update={"content": content}))
                     self.history.append(ChatMessage(role="user", content=correction))
                     continue
+                if self.effort == "genius" and action_turn and not genius_checked:
+                    # highest level: one completeness pass before accepting —
+                    # the model must re-read the request and close any gaps
+                    genius_checked = True
+                    self.recorder.event("chat", "genius_check")
+                    self.history.append(message.model_copy(update={"content": content}))
+                    self.history.append(ChatMessage(role="user", content=_GENIUS_CHECK))
+                    continue
                 self.history.append(message.model_copy(update={"content": content}))
                 self.save_transcript()
                 return content
@@ -400,14 +430,34 @@ class ChatSession:
         self.history.append(ChatMessage(role="assistant", content=note))
         return note
 
+    def set_effort(self, level: str) -> None:
+        if level not in ("fast", "smart", "genius"):
+            raise ValueError(f"Unknown effort level {level!r} (fast|smart|genius).")
+        self.effort = level
+        self.recorder.event("chat", "effort_changed", output=level)
+
+    def _step_budget(self) -> int:
+        base = self.settings.max_agent_steps
+        if self.effort == "fast":
+            return max(8, int(base * 0.6))
+        if self.effort == "genius":
+            return int(base * 1.5)
+        return base
+
     def _interpret(self, user_text: str) -> str:
         """Two-model brain: the thinker model turns the raw message into a
         precise brief for the coder. An enhancement, never a blocker — any
-        failure silently falls back to the raw message."""
-        if self._thinker is None:
+        failure silently falls back to the raw message. Fast skips it;
+        genius self-briefs with the main model when no thinker is set."""
+        if self.effort == "fast":
+            return ""
+        thinker = self._thinker
+        if thinker is None and self.effort == "genius":
+            thinker = self.llm  # self-brief: reason first, act second
+        if thinker is None:
             return ""
         try:
-            response = self._thinker.chat(
+            response = thinker.chat(
                 [
                     ChatMessage(role="system", content=_THINKER_SYSTEM),
                     ChatMessage(role="user", content=user_text),
@@ -443,18 +493,34 @@ class ChatSession:
         return note
 
     def _expand_mentions(self, text: str) -> str:
-        """Inline @path/to/file.ext mentions, Claude Code style."""
+        """Inline @path/to/file.ext mentions, Claude Code style. Image
+        mentions are described by the vision model instead of inlined raw."""
         blocks: list[str] = []
         for mention in dict.fromkeys(_MENTION_RE.findall(text)):
             try:
                 resolved = self._guard.resolve_path(mention.replace("\\", "/"))
             except Exception:  # noqa: BLE001 — bad mention is just text
                 continue
-            if resolved.is_file():
-                content = resolved.read_text(encoding="utf-8-sig", errors="replace")
-                if len(content) > _MAX_MENTION_CHARS:
-                    content = content[:_MAX_MENTION_CHARS] + "\n... [truncated]"
-                blocks.append(f"--- content of {mention} ---\n{content}")
+            if not resolved.is_file():
+                continue
+            if resolved.suffix.lower() in IMAGE_EXTENSIONS:
+                if self._vision is None:
+                    blocks.append(
+                        f"--- {mention} is an image; no vision model is configured "
+                        "(set FORGE_VISION_MODEL, e.g. after `ollama pull llava`) ---"
+                    )
+                else:
+                    seen = self._vision.run(path=mention)
+                    blocks.append(
+                        seen.output
+                        if seen.ok
+                        else f"--- could not see {mention}: {seen.error} ---"
+                    )
+                continue
+            content = resolved.read_text(encoding="utf-8-sig", errors="replace")
+            if len(content) > _MAX_MENTION_CHARS:
+                content = content[:_MAX_MENTION_CHARS] + "\n... [truncated]"
+            blocks.append(f"--- content of {mention} ---\n{content}")
         if blocks:
             text += "\n\n" + "\n\n".join(blocks)
         return text

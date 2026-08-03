@@ -116,7 +116,13 @@ class ChatManager:
         self.sessions: dict[str, ManagedChat] = {}
         self.current: ManagedChat | None = None
 
-    def start(self, workspace: Path | None, model: str | None, mode: str) -> ManagedChat:
+    def start(
+        self,
+        workspace: Path | None,
+        model: str | None,
+        mode: str,
+        effort: str | None = None,
+    ) -> ManagedChat:
         workspace = (workspace or self.default_workspace).resolve()
         if not workspace.is_dir():
             raise ValueError(f"Not a directory: {workspace}")
@@ -144,6 +150,8 @@ class ChatManager:
             recorder=recorder,
             session_id=f"app-{chat_id}",
         )
+        if effort:
+            session.set_effort(effort)
         managed = ManagedChat(
             chat_id, session, approver, policy, workspace, resolved_model, mode, events
         )
@@ -235,6 +243,7 @@ class StartRequest(BaseModel):
     workspace: str | None = None
     model: str | None = None
     mode: str = Field(default="ask", pattern="^(ask|auto)$")
+    effort: str | None = Field(default=None, pattern="^(fast|smart|genius)$")
 
 
 class MessageRequest(BaseModel):
@@ -254,6 +263,10 @@ class SelectRequest(BaseModel):
     session_id: str
 
 
+class EffortRequest(BaseModel):
+    effort: str = Field(pattern="^(fast|smart|genius)$")
+
+
 def build_chat_router(manager: ChatManager) -> APIRouter:
     router = APIRouter(prefix="/api/chat")
 
@@ -261,7 +274,10 @@ def build_chat_router(manager: ChatManager) -> APIRouter:
     def start(body: StartRequest) -> dict:
         try:
             managed = manager.start(
-                Path(body.workspace) if body.workspace else None, body.model, body.mode
+                Path(body.workspace) if body.workspace else None,
+                body.model,
+                body.mode,
+                body.effort,
             )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
@@ -322,6 +338,12 @@ def build_chat_router(manager: ChatManager) -> APIRouter:
         managed.approver.resolve(body.approved)
         return {"ok": True}
 
+    @router.post("/effort")
+    def switch_effort(body: EffortRequest) -> dict:
+        managed = _current()
+        managed.session.set_effort(body.effort)
+        return _state(managed)
+
     @router.post("/model")
     def switch_model(body: ModelRequest) -> dict:
         managed = _current()
@@ -356,6 +378,7 @@ def build_chat_router(manager: ChatManager) -> APIRouter:
             "workspace": str(managed.workspace),
             "model": managed.model,
             "mode": managed.mode,
+            "effort": managed.session.effort,
             "status": managed.status,
             "partial": managed.partial_text if managed.status == "working" else "",
             "queued": len(managed.queue),

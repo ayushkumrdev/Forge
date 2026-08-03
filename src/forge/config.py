@@ -53,3 +53,13 @@ class ForgeSettings(BaseSettings):
     # "qwen2.5:7b-instruct" thinks, qwen2.5-coder:7b implements).
     # Empty string disables the thinker stage.
     thinker_model: str = ""
+
+    # Vision — optional multimodal model that lets Forge see images
+    # (screenshots, diagrams, error photos), e.g. "llava:7b" or "minicpm-v".
+    # Empty string disables the read_image tool and @image mentions.
+    vision_model: str = ""
+
+    # Effort level: "fast" (snappy, fewer aids), "smart" (default: grounding
+    # on), "genius" (dual-model brief + completeness self-check + bigger
+    # step budget — the most capable, and the slowest)
+    effort: str = "smart"

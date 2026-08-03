@@ -102,6 +102,30 @@ Small local models drift; Forge corrects them with reality, not prompting:
   dense embeddings via Ollama (`FORGE_EMBEDDING_MODEL=nomic-embed-text`), fused
   with reciprocal-rank fusion.
 
+## Vision — Forge can see
+
+Pull a local multimodal model and Forge gains eyes:
+
+```powershell
+ollama pull llava:7b
+$env:FORGE_VISION_MODEL = "llava:7b"
+```
+
+- Mention an image in chat — `what's wrong in @screenshot.png` — and the
+  vision model describes it (text transcribed exactly) before the coder acts.
+- Or the agent calls `read_image` itself: screenshots, UI mockups, diagrams,
+  photos of error screens. Images never leave the machine.
+
+## Effort levels — Fast · Smart · Genius
+
+Pick how hard Forge thinks (welcome screen or top bar, switchable mid-chat):
+
+| Level | What you get |
+| --- | --- |
+| **Fast** | Snappy: no intent brief, no retrieval pre-flight, smaller step budget |
+| **Smart** | Default: retrieval pre-flight + grounding gates + thinker (if configured) |
+| **Genius** | Highest: dual-model intent brief (self-briefs when no thinker is set), a final completeness check that re-reads your request before answering, 1.5× step budget |
+
 ## Two-model brain
 
 Set `FORGE_THINKER_MODEL` to run Forge on two local models at once:
@@ -187,6 +211,8 @@ Everything is overridable via environment variables (or a `.env` file):
 | `FORGE_SYNTAX_GATE` | `1` | Parse-verify every write/edit before it lands |
 | `FORGE_GITHUB_TOKEN` | (empty) | GitHub token for higher API limits + private repos |
 | `FORGE_THINKER_MODEL` | (empty) | Second model that interprets intent before the coder acts |
+| `FORGE_VISION_MODEL` | (empty) | Multimodal model that lets Forge see images (e.g. `llava:7b`) |
+| `FORGE_EFFORT` | `smart` | Default effort level: `fast`, `smart`, or `genius` |
 
 ## Project layout
 

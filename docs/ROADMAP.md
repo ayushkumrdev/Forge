@@ -178,13 +178,26 @@ changing files) with enforcement, not hope:
   design) replacing the anvil; it rotates/fades — "thinks" — while Forge is
   working and while a reply is streaming.
 
-## Milestone 15 — Execution isolation & scale
+## ✅ Milestone 15 — Vision + effort levels
+- **read_image tool** (`tools/vision.py`): a local multimodal model (llava,
+  minicpm-v, …) describes images and transcribes their text for the coder —
+  screenshots, mockups, diagrams, error photos. `FORGE_VISION_MODEL`;
+  friendly "ollama pull" guidance when the model is missing.
+- **@image mentions**: mentioning an image file in chat auto-runs the vision
+  model and inlines the description before the coder generates.
+- **Effort levels** — Fast / Smart / Genius (`FORGE_EFFORT`, UI switcher on
+  welcome + top bar, `/api/chat/effort` to change mid-session):
+  fast = no brief/pre-flight, 0.6× steps; smart = full grounding (default);
+  genius = intent brief (self-brief without a thinker), one completeness
+  check pass that re-reads the request before the final answer, 1.5× steps.
+
+## Milestone 16 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 16 — More agents & evaluation
+## Milestone 17 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness
