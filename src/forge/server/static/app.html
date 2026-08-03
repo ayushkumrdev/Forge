@@ -122,7 +122,10 @@
   #w-err { color: var(--err); font-size: 12.5px; margin-top: 10px; min-height: 17px; }
 
   /* ─── thread ──────────────────────────────────────────── */
-  #thread { flex: 1; overflow-y: auto; display: none; scroll-behavior: smooth; }
+  /* No scroll-behavior here: following new output must be instant. An
+     animated auto-scroll fires scroll events at intermediate positions,
+     which the pinning logic reads as "the user scrolled away". */
+  #thread { flex: 1; overflow-y: auto; display: none; }
   #thread.on { display: block; }
   .lane { max-width: 760px; margin: 0 auto; padding: 30px 26px 10px; }
   .m { margin-bottom: 26px; animation: rise .22s ease both; }
@@ -249,6 +252,24 @@
   #stop { display: none; background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 15px; padding: 5px 13px; font-size: 12px; font-family: var(--body); cursor: pointer; }
   #stop:hover { border-color: var(--err); color: var(--err); }
   #stop.on { display: block; }
+  #jump {
+    display: none; position: absolute; left: 50%; transform: translateX(-50%);
+    bottom: 108px; z-index: 20; background: var(--raise); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 16px; padding: 6px 15px;
+    font-size: 12.5px; font-family: var(--body); cursor: pointer;
+    box-shadow: 0 6px 20px -8px rgba(0,0,0,.7);
+  }
+  #jump.on { display: block; }
+  #jump:hover { background: var(--surface); }
+  main { position: relative; }
+  .m-forge .tag { position: relative; }
+  .copy-reply {
+    background: none; border: 0; color: var(--faint); cursor: pointer;
+    font-size: 11.5px; font-family: var(--body); padding: 2px 6px;
+    border-radius: 5px; margin-left: 8px; opacity: 0; transition: opacity .15s;
+  }
+  .m-forge:hover .copy-reply { opacity: 1; }
+  .copy-reply:hover { color: var(--ink); background: var(--surface); }
   .self-correct {
     font-size: 12.5px; color: var(--warn); margin: -8px 0 16px;
     padding-left: 13px; border-left: 2px solid rgba(217,164,65,.4);
@@ -336,6 +357,7 @@
   </div>
 
   <div id="thread"><div class="lane" id="lane"></div></div>
+  <button id="jump" onclick="jumpToLatest()" title="Jump to latest">↓ Latest</button>
 
   <div id="composer"><div class="comp-shell">
     <div class="comp-box">
@@ -383,7 +405,7 @@
 const LOGO = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5c1.3 6 4.5 9.2 10.5 10.5-6 1.3-9.2 4.5-10.5 10.5C10.7 16.5 7.5 13.3 1.5 12 7.5 10.7 10.7 7.5 12 1.5Z"/></svg>';
 const $ = (s) => document.querySelector(s);
 const esc = (t) => (t ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const S = { active:false, status:"idle", msgSeen:0, evtSeen:0, timer:null, workStart:0, wMode:"ask", wEffort:"smart", pollGen:0, sessionId:null, mode:"ask", attachments:[] };
+const S = { active:false, status:"idle", msgSeen:0, evtSeen:0, timer:null, workStart:0, wMode:"ask", wEffort:"smart", pollGen:0, sessionId:null, mode:"ask", attachments:[], pinned:true };
 
 async function api(path, body) {
   const opts = body !== undefined
@@ -618,8 +640,9 @@ async function newChat() {
 }
 function enterChat(st) {
   S.active = true; S.msgSeen = 0; S.evtSeen = 0; S.status = "idle"; S.pollGen++;
-  S.sessionId = st.session_id; S.attachments = [];
+  S.sessionId = st.session_id; S.attachments = []; S.pinned = true;
   renderAttachChips();
+  $("#jump").classList.remove("on");
   $("#welcome").style.display = "none";
   $("#sidebar").classList.add("on");
   $("#topbar").classList.add("on");
@@ -708,8 +731,24 @@ function renderReply(text) {
 function addForge(text, kind) {
   const cls = kind === "error" ? "err" : kind === "command" ? "cmd" : "";
   const body = kind === "error" || kind === "command" ? md(text) : renderReply(text);
+  const id = "r" + Math.random().toString(36).slice(2, 8);
+  window._replies = window._replies || {};
+  window._replies[id] = text;
   $("#lane").insertAdjacentHTML("beforeend",
-    `<div class="m m-forge ${cls}"><div class="tag">${LOGO}Forge</div><div class="body">${body}</div></div>`);
+    `<div class="m m-forge ${cls}"><div class="tag">${LOGO}Forge`
+    + `<button class="copy-reply" onclick="copyReply('${id}', this)">Copy</button></div>`
+    + `<div class="body">${body}</div></div>`);
+}
+function copyReply(id, btn) {
+  const text = (window._replies || {})[id];
+  if (text === undefined) return;
+  const flash = () => {
+    btn.textContent = "Copied";
+    setTimeout(() => { btn.textContent = "Copy"; }, 1200);
+  };
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(flash, () => fallbackCopy(text, flash));
+  } else fallbackCopy(text, flash);
 }
 
 const GLYPHS = {
@@ -822,6 +861,38 @@ function setPartial(text) {
   live.querySelector(".body").innerHTML = renderReply(text) + '<span class="cursor"></span>';
 }
 
+/* ── scrolling ───────────────────────────────────────────────
+   Follow new output only while the reader is already at the bottom.
+   Scrolling up to read something must never be undone by the next poll. */
+const _PIN_SLACK_PX = 120;
+function atBottom() {
+  const t = $("#thread");
+  return t.scrollHeight - t.scrollTop - t.clientHeight < _PIN_SLACK_PX;
+}
+let _lastAutoTop = -1;
+function keepPinned() {
+  const t = $("#thread");
+  // Don't rely on scroll events alone — they are not guaranteed for every
+  // programmatic move. If the position drifted from where we last put it and
+  // we're no longer near the bottom, the reader moved it: stop following.
+  if (S.pinned && _lastAutoTop >= 0 && Math.abs(t.scrollTop - _lastAutoTop) > 2
+      && !atBottom()) {
+    S.pinned = false;
+  }
+  if (S.pinned) {
+    t.scrollTop = t.scrollHeight;
+    _lastAutoTop = t.scrollTop;
+  }
+  $("#jump").classList.toggle("on", !S.pinned);
+}
+function jumpToLatest() {
+  S.pinned = true;
+  const t = $("#thread");
+  t.scrollTo({ top: t.scrollHeight, behavior: "smooth" });  // deliberate, so animate
+  _lastAutoTop = -1;  // re-baseline after the animation settles
+  $("#jump").classList.remove("on");
+}
+
 /* ── polling ─────────────────────────────────────────────── */
 async function poll(gen, fast) {
   if (!S.active || gen !== S.pollGen) return;
@@ -869,9 +940,7 @@ async function poll(gen, fast) {
     $("#u-out").textContent = st.usage.completion_tokens.toLocaleString();
     $("#u-changed").textContent = st.changed_files.length ? `${st.changed_files.length} file(s) changed` : "";
 
-    if (st.messages.length || toolEvents.length || st.partial) {
-      $("#thread").scrollTop = $("#thread").scrollHeight;
-    }
+    if (st.messages.length || toolEvents.length || st.partial) keepPinned();
     if (st.status === "working" || wasWorking) refreshSessions();
   } catch (e) { /* transient — keep polling */ }
   S.timer = setTimeout(() => poll(gen), S.status === "working" || fast ? 450 : 2500);
@@ -910,6 +979,16 @@ function autosize() { input.style.height = "auto"; input.style.height = Math.min
 input.addEventListener("input", autosize);
 input.addEventListener("keydown", (e) => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+$("#thread").addEventListener("scroll", () => {
+  S.pinned = atBottom();
+  $("#jump").classList.toggle("on", !S.pinned);
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && S.status === "working") { stopTurn(); return; }
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && S.active) {
+    e.preventDefault(); newChat();
+  }
 });
 
 /* ── boot ────────────────────────────────────────────────── */
