@@ -147,6 +147,24 @@ _PROMISE_RE = re.compile(
 )
 _MAX_ACTION_NUDGES = 2
 
+# system prompt for the optional second model (the "thinker"): it never
+# touches tools — it turns the user's raw message into a precise brief the
+# coder model can act on without misreading intent
+_THINKER_SYSTEM = """You are the reasoning half of a two-model AI software \
+engineer. A separate coder model will act on the user's message with real \
+tools. Your job: read the user's message and write a short brief so the coder \
+cannot misunderstand it.
+
+State plainly:
+1. INTENT — what the user actually wants, in one sentence.
+2. STEPS — the concrete actions to take, in order.
+3. WHERE — likely files/areas involved (best guess from the message).
+4. VERIFY — how the coder should prove it worked.
+
+Under 150 words. Plain text only, no code, no markdown headers. If the \
+message is a simple question needing no file changes, reply with just: \
+QUESTION: <the question restated precisely>."""
+
 _PASTED_CODE_NUDGE = (
     "You pasted code into the chat instead of applying it. The user asked you "
     "to make this change — you have tools, so make it yourself NOW: call "
@@ -187,6 +205,7 @@ class ChatSession:
         recorder: Recorder | None = None,
         store: MemoryStore | None = None,
         session_id: str = "chat",
+        thinker_llm: LLMClient | None = None,
     ) -> None:
         self.workspace = workspace.resolve()
         self.llm = llm
@@ -199,6 +218,12 @@ class ChatSession:
         self.on_stream = None  # Callable[[str], None] — receives content deltas
         self.on_step = None  # Callable[[], None] — called before each LLM step
         self.should_stop = None  # Callable[[], bool] — soft cancel
+
+        self._thinker = thinker_llm
+        if self._thinker is None and self.settings.thinker_model:
+            from forge.llm.factory import make_client
+
+            self._thinker = make_client(self.settings, model=self.settings.thinker_model)
 
         self._guard = SafetyGuard(self.workspace)
         self.ledger = ChangeLedger(self.workspace, session_id)
@@ -266,6 +291,12 @@ class ChatSession:
             context = self._engine.preflight(user_text)
             if context:
                 expanded += "\n\n" + context
+        brief = self._interpret(user_text)
+        if brief:
+            expanded += (
+                "\n\n## Intent brief (a reasoning model interpreted the request"
+                " — follow it unless the user's own words contradict it)\n" + brief
+            )
         self.history.append(ChatMessage(role="user", content=expanded))
         self._maybe_compact()
 
@@ -368,6 +399,28 @@ class ChatSession:
         note = "Stopped: step budget exhausted for this turn."
         self.history.append(ChatMessage(role="assistant", content=note))
         return note
+
+    def _interpret(self, user_text: str) -> str:
+        """Two-model brain: the thinker model turns the raw message into a
+        precise brief for the coder. An enhancement, never a blocker — any
+        failure silently falls back to the raw message."""
+        if self._thinker is None:
+            return ""
+        try:
+            response = self._thinker.chat(
+                [
+                    ChatMessage(role="system", content=_THINKER_SYSTEM),
+                    ChatMessage(role="user", content=user_text),
+                ]
+            )
+        except Exception:  # noqa: BLE001 — thinker failure must not kill the turn
+            self.recorder.event("chat", "thinker_failed")
+            return ""
+        self.usage.add(response.usage)
+        brief = response.message.content.strip()
+        if brief:
+            self.recorder.event("chat", "intent_brief", output=brief[:300])
+        return brief
 
     @staticmethod
     def _deflection(content: str) -> str | None:

@@ -165,13 +165,26 @@ changing files) with enforcement, not hope:
   decoded URLs, and snippets — pairs with fetch_url for read-the-docs flows.
   Numeric HTML entities now decoded. Live-verified.
 
-## Milestone 14 — Execution isolation & scale
+## ✅ Milestone 14 — Two-model brain + live file cards
+- **Dual-LLM pipeline** (`FORGE_THINKER_MODEL`): a reasoning model interprets
+  each message (intent, steps, likely files, verification) and briefs the
+  coder model, which implements with tools. Failures degrade silently to
+  single-model mode; the brief is recorded as an `intent_brief` event.
+- **File-operation cards** in the app: edits/creates/deletes render as
+  "✎ Edited path ⌄" with a rotating chevron that expands into a real
+  colored +/- diff (capped with "… N more lines"); success results stay
+  quiet, errors surface inline. Verified by rendering live synthetic events.
+- **New abstract logo**: a concave four-point spark (single SVG path, own
+  design) replacing the anvil; it rotates/fades — "thinks" — while Forge is
+  working and while a reply is streaming.
+
+## Milestone 15 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 15 — More agents & evaluation
+## Milestone 16 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness

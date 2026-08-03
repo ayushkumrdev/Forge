@@ -102,6 +102,20 @@ Small local models drift; Forge corrects them with reality, not prompting:
   dense embeddings via Ollama (`FORGE_EMBEDDING_MODEL=nomic-embed-text`), fused
   with reciprocal-rank fusion.
 
+## Two-model brain
+
+Set `FORGE_THINKER_MODEL` to run Forge on two local models at once:
+
+```powershell
+$env:FORGE_THINKER_MODEL = "qwen2.5:7b-instruct"   # thinks
+$env:FORGE_MODEL         = "qwen2.5-coder:7b"      # implements
+```
+
+Every message first goes to the **thinker**, which works out your intent —
+what you actually want, the steps, the likely files, how to verify — and
+writes a brief. The **coder** then implements with tools, guided by that
+brief. Thinker failures degrade silently to single-model mode.
+
 ## GitHub intelligence
 
 Point Forge at any GitHub project — no clone needed to understand it:
@@ -172,6 +186,7 @@ Everything is overridable via environment variables (or a `.env` file):
 | `FORGE_COMMAND_TIMEOUT_S` | `300` | Timeout for each shell command |
 | `FORGE_SYNTAX_GATE` | `1` | Parse-verify every write/edit before it lands |
 | `FORGE_GITHUB_TOKEN` | (empty) | GitHub token for higher API limits + private repos |
+| `FORGE_THINKER_MODEL` | (empty) | Second model that interprets intent before the coder acts |
 
 ## Project layout
 

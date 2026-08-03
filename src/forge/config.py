@@ -47,3 +47,9 @@ class ForgeSettings(BaseSettings):
 
     # Chat — history length that triggers LLM compaction of older turns
     chat_compact_threshold: int = 30
+
+    # Two-model brain — optional reasoning model that interprets the user's
+    # intent and briefs the coder model before it acts (e.g.
+    # "qwen2.5:7b-instruct" thinks, qwen2.5-coder:7b implements).
+    # Empty string disables the thinker stage.
+    thinker_model: str = ""

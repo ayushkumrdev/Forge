@@ -157,14 +157,22 @@
   .tcard .tname { color: var(--ink); font-weight: 600; }
   .tcard .targ { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
   .tcard .st-ok { color: var(--ok); } .tcard .st-err { color: var(--err); }
-  .tcard .tbody { border-top: 1px solid var(--line-soft); padding: 11px 13px; font-family: var(--mono); font-size: 11.5px; color: var(--dim); white-space: pre-wrap; word-break: break-all; max-height: 220px; overflow-y: auto; background: var(--bg); }
+  .tcard .tbody { border-top: 1px solid var(--line-soft); padding: 11px 13px; font-family: var(--mono); font-size: 11.5px; color: var(--dim); white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow-y: auto; background: var(--bg); }
   .tbody .sect { color: var(--faint); letter-spacing: 1px; text-transform: uppercase; font-size: 9.5px; margin: 7px 0 3px; }
+  .tcard .chev { color: var(--faint); font-size: 12px; transition: transform .15s ease; }
+  .tcard[open] .chev { transform: rotate(180deg); }
+  .tbody .dline { white-space: pre-wrap; word-break: break-all; padding: 1px 6px; border-radius: 4px; }
+  .tbody .dline.da { color: #a5c28b; background: rgba(165,194,139,.08); }
+  .tbody .dline.dd { color: #e5978d; background: rgba(229,117,106,.08); }
+  .tbody .dline.dmute { color: var(--faint); }
 
   /* working indicator */
   #working { display: none; align-items: center; gap: 10px; padding: 4px 0 24px; font-size: 13px; color: var(--dim); }
   #working.on { display: flex; }
-  .flame { width: 16px; height: 16px; color: var(--accent); animation: fadepulse 1.4s ease-in-out infinite; }
-  .flame svg { width: 100%; height: 100%; display: block; }
+  .flame { width: 16px; height: 16px; color: var(--accent); }
+  .flame svg { width: 100%; height: 100%; display: block; animation: think 1.6s ease-in-out infinite; }
+  @keyframes think { 0%, 100% { transform: rotate(0deg) scale(1); opacity: 1; } 50% { transform: rotate(180deg) scale(.78); opacity: .4; } }
+  #live-msg .tag svg { animation: think 1.6s ease-in-out infinite; }
   #queued-note { color: var(--warn); }
 
   /* ─── composer ────────────────────────────────────────── */
@@ -213,7 +221,7 @@
 <body>
 
 <aside id="sidebar">
-  <div class="wordmark"><b><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 6H9C6.8 6 4.9 6.9 3 7.2v2.1c1.6.3 3.2.2 4.8.2h1.7c0 2.3-1.2 4.2-3.3 4.9V16h11.6v-1.6c-2.1-.7-3.3-2.6-3.3-4.9H21V6Z"/><path d="M7 17.5h10l1.2 2.5H5.8L7 17.5Z"/></svg></b>Forge</div>
+  <div class="wordmark"><b><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5c1.3 6 4.5 9.2 10.5 10.5-6 1.3-9.2 4.5-10.5 10.5C10.7 16.5 7.5 13.3 1.5 12 7.5 10.7 10.7 7.5 12 1.5Z"/></svg></b>Forge</div>
   <button id="new-chat" onclick="newChat()">New chat</button>
   <div id="convos"></div>
   <div class="side-foot">
@@ -235,7 +243,7 @@
 
   <div id="welcome">
     <div class="hero">
-      <div class="hero-mark"><b><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 6H9C6.8 6 4.9 6.9 3 7.2v2.1c1.6.3 3.2.2 4.8.2h1.7c0 2.3-1.2 4.2-3.3 4.9V16h11.6v-1.6c-2.1-.7-3.3-2.6-3.3-4.9H21V6Z"/><path d="M7 17.5h10l1.2 2.5H5.8L7 17.5Z"/></svg></b>Forge</div>
+      <div class="hero-mark"><b><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5c1.3 6 4.5 9.2 10.5 10.5-6 1.3-9.2 4.5-10.5 10.5C10.7 16.5 7.5 13.3 1.5 12 7.5 10.7 10.7 7.5 12 1.5Z"/></svg></b>Forge</div>
       <div class="hero-sub">Your software engineer, on your machine. Forge reads, edits, runs and verifies real code in the folder you choose — <em>and nothing ever leaves this computer.</em></div>
       <div class="panel">
         <label class="lbl">Project folder</label>
@@ -291,7 +299,7 @@
 
 <script>
 "use strict";
-const LOGO = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 6H9C6.8 6 4.9 6.9 3 7.2v2.1c1.6.3 3.2.2 4.8.2h1.7c0 2.3-1.2 4.2-3.3 4.9V16h11.6v-1.6c-2.1-.7-3.3-2.6-3.3-4.9H21V6Z"/><path d="M7 17.5h10l1.2 2.5H5.8L7 17.5Z"/></svg>';
+const LOGO = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5c1.3 6 4.5 9.2 10.5 10.5-6 1.3-9.2 4.5-10.5 10.5C10.7 16.5 7.5 13.3 1.5 12 7.5 10.7 10.7 7.5 12 1.5Z"/></svg>';
 const $ = (s) => document.querySelector(s);
 const esc = (t) => (t ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const S = { active:false, status:"idle", msgSeen:0, evtSeen:0, timer:null, workStart:0, wMode:"ask", pollGen:0 };
@@ -486,11 +494,33 @@ function lastPendingCard() {
   }
   return null;
 }
+const FILE_VERBS = { write_file: "Created", edit_file: "Edited", delete_file: "Deleted" };
+function diffLines(text, sign, cls, cap = 30) {
+  const lines = String(text ?? "").replace(/\n$/, "").split("\n");
+  let html = lines.slice(0, cap)
+    .map(l => `<div class="dline ${cls}">${sign} ${esc(l)}</div>`).join("");
+  if (lines.length > cap) html += `<div class="dline dmute">… ${lines.length - cap} more lines</div>`;
+  return html;
+}
+function fileOpBody(e) {
+  const a = e.arguments || {};
+  if (e.tool === "edit_file")
+    return diffLines(a.old_string, "-", "dd") + diffLines(a.new_string, "+", "da");
+  if (e.tool === "write_file") return diffLines(a.content, "+", "da");
+  return `<div class="dline dd">- ${esc(a.path || "")}</div>`;
+}
 function addToolEvents(events) {
   for (const e of events) {
     if (e.kind === "tool_call") {
       const card = document.createElement("details"); card.className = "tcard";
-      card.innerHTML = `<summary><span class="glyph">${GLYPHS[e.tool] || "◦"}</span><span class="tname">${esc(e.tool)}</span><span class="targ">${esc(String(primaryArg(e.arguments)))}</span><span class="tstat">…</span></summary><div class="tbody"><div class="sect">arguments</div>${esc(JSON.stringify(e.arguments || {}, null, 1))}</div>`;
+      const verb = FILE_VERBS[e.tool];
+      const head = verb
+        ? `<span class="tname">${verb}</span><span class="targ">${esc((e.arguments || {}).path || "")}</span>`
+        : `<span class="tname">${esc(e.tool)}</span><span class="targ">${esc(String(primaryArg(e.arguments)))}</span>`;
+      const body = verb
+        ? fileOpBody(e)
+        : `<div class="sect">arguments</div>${esc(JSON.stringify(e.arguments || {}, null, 1))}`;
+      card.innerHTML = `<summary><span class="glyph">${GLYPHS[e.tool] || "◦"}</span>${head}<span class="tstat">…</span><span class="chev">⌄</span></summary><div class="tbody">${body}</div>`;
       currentToolBox().appendChild(card);
     } else if (e.kind === "tool_result") {
       const card = lastPendingCard();
@@ -498,7 +528,8 @@ function addToolEvents(events) {
       const stat = card.querySelector(".tstat");
       if (stat) stat.outerHTML = e.ok ? '<span class="st-ok">✓</span>' : '<span class="st-err">✗</span>';
       const body = card.querySelector(".tbody");
-      if (body) {
+      // file-op cards already show the diff; only add noise when it failed
+      if (body && !(e.ok && FILE_VERBS[e.tool])) {
         const detail = e.ok ? (e.output || "(done)") : (e.error || "error");
         body.insertAdjacentHTML("beforeend", `<div class="sect">${e.ok ? "result" : "error"}</div>${esc(detail)}`);
       }
