@@ -20,6 +20,10 @@ desktop). Pick a project folder to give Forge access, then just talk:
 
 - Chat like you would with Claude — Forge reads, searches, edits and builds in
   the selected folder, showing every tool action live in the thread.
+- **Everything in the chat box**: ＋ to attach images (described by the vision
+  model), Ask first/Auto permission pill, Fast·Smart·Genius effort selector.
+- **Conversations persist**: past chats appear in the sidebar across launches,
+  resume with full history, and delete with one click.
 - **Ask mode** (default): every file write or command pops an approval dialog —
   Deny / Allow / Allow always. Auto mode skips the prompts.
 - **Switch models anytime** from the dropdown — it lists whatever `ollama list`

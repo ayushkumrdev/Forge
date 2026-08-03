@@ -4,8 +4,12 @@ permission approvals — the GUI equivalent of Claude Code's 'Allow?' prompt."""
 
 from __future__ import annotations
 
+import base64
+import contextlib
 import json
+import re
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -18,7 +22,7 @@ from pydantic import BaseModel, Field
 from forge.chat import commands as chat_commands
 from forge.chat.session import ChatSession
 from forge.config import ForgeSettings
-from forge.llm.base import LLMClient
+from forge.llm.base import ChatMessage, LLMClient
 from forge.safety.permissions import PermissionPolicy
 from forge.telemetry import Recorder
 
@@ -27,6 +31,44 @@ ChatLLMFactory = Callable[[str | None], LLMClient]
 
 _APPROVAL_TIMEOUT_S = 600.0
 _MAX_RECENT_FOLDERS = 8
+_MAX_ATTACH_BYTES = 15 * 1024 * 1024
+_MAX_SAVED_SESSIONS = 30
+
+# context Forge injects into user turns (briefs, retrieved code, file/image
+# expansions) is machinery — strip it when showing a transcript in the UI
+_INJECTED_MARKERS = (
+    "\n\n## Intent brief",
+    "\n\n## Relevant code from the repository",
+    "\n\n--- ",
+    "\n\n[image ",
+)
+# corrective nudges are stored as user turns; hide them from the UI too
+_NUDGE_PREFIXES = (
+    "Your last reply was empty",
+    "You pasted code into the chat",
+    "You described what you would do",
+    "You claimed the tests/checks ran",
+    "Final completeness check:",
+)
+
+
+def _display_text(content: str) -> str:
+    for marker in _INJECTED_MARKERS:
+        content = content.split(marker)[0]
+    return content
+
+
+def _display_messages(history: list[ChatMessage]) -> list[dict[str, Any]]:
+    """Rebuild the UI message list from a persisted transcript."""
+    out: list[dict[str, Any]] = []
+    for m in history:
+        if m.role == "user":
+            text = _display_text(m.content).strip()
+            if text and not text.startswith(_NUDGE_PREFIXES):
+                out.append({"role": "user", "text": text})
+        elif m.role == "assistant" and m.content and not m.tool_calls:
+            out.append({"role": "assistant", "kind": "chat", "text": m.content})
+    return out
 
 
 class UIApprover:
@@ -132,9 +174,8 @@ class ChatManager:
             self.current.approver.resolve(False)
 
         approver = UIApprover()
-        policy = (
-            PermissionPolicy("auto") if mode == "auto" else PermissionPolicy("ask", approver)
-        )
+        # approver is attached in both modes so ask<->auto can switch mid-chat
+        policy = PermissionPolicy(mode, approver)
         llm = self._llm_factory(model)
         resolved_model = getattr(llm, "model", model or self.settings.model)
         chat_id = uuid.uuid4().hex[:12]
@@ -163,9 +204,88 @@ class ChatManager:
     def select(self, chat_id: str) -> ManagedChat:
         managed = self.sessions.get(chat_id)
         if managed is None:
-            raise KeyError(chat_id)
+            return self.resume(chat_id)
         self.current = managed
         return managed
+
+    # -- persistent conversations --------------------------------------------------
+
+    def _chats_workspace(self) -> Path:
+        return self.current.workspace if self.current else self.default_workspace
+
+    def saved_sessions(self, workspace: Path | None = None) -> list[dict[str, Any]]:
+        """Transcripts on disk for this workspace — conversations from past
+        launches that can be resumed (or deleted)."""
+        workspace = workspace or self._chats_workspace()
+        chat_dir = workspace / ".forge" / "chat"
+        if not chat_dir.is_dir():
+            return []
+        items: list[dict[str, Any]] = []
+        files = sorted(chat_dir.glob("app-*.json"), key=lambda p: -p.stat().st_mtime)
+        for f in files[:_MAX_SAVED_SESSIONS]:
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not data:
+                continue  # an empty transcript is clutter, not a conversation
+            title = "Conversation"
+            for m in data:
+                if m.get("role") == "user":
+                    lines = _display_text(m.get("content", "")).strip().splitlines()
+                    if lines:
+                        title = lines[0][:60]
+                        break
+            items.append(
+                {
+                    "session_id": f.stem[4:],  # "app-<id>.json" -> "<id>"
+                    "title": title,
+                    "workspace": str(workspace),
+                    "model": self.settings.model,
+                    "status": "saved",
+                    "current": False,
+                    "message_count": len(data),
+                }
+            )
+        return items
+
+    def resume(self, chat_id: str) -> ManagedChat:
+        """Reopen a persisted conversation: rebuild the session from its
+        transcript so history, memory and undo scope continue."""
+        workspace = self._chats_workspace()
+        transcript = workspace / ".forge" / "chat" / f"app-{chat_id}.json"
+        if not transcript.exists():
+            raise KeyError(chat_id)
+        approver = UIApprover()
+        policy = PermissionPolicy("ask", approver)
+        llm = self._llm_factory(None)
+        events: list[dict[str, Any]] = []
+        recorder = Recorder(f"app-{chat_id}", workspace, console=None, sink=events.append)
+        session = ChatSession(
+            workspace, llm, self.settings,
+            policy=policy, recorder=recorder, session_id=f"app-{chat_id}",
+        )
+        session.load_transcript()
+        managed = ManagedChat(
+            chat_id, session, approver, policy, workspace,
+            getattr(llm, "model", self.settings.model), "ask", events,
+        )
+        managed.messages = _display_messages(session.history)
+        self.sessions[chat_id] = managed
+        self.current = managed
+        return managed
+
+    def delete(self, chat_id: str) -> None:
+        managed = self.sessions.pop(chat_id, None)
+        workspace = managed.workspace if managed else self._chats_workspace()
+        if managed is not None:
+            managed.request_cancel()
+            if self.current is managed:
+                remaining = list(self.sessions.values())
+                self.current = remaining[-1] if remaining else None
+        transcript = workspace / ".forge" / "chat" / f"app-{chat_id}.json"
+        with contextlib.suppress(OSError):
+            transcript.unlink(missing_ok=True)
 
     # -- turn execution -----------------------------------------------------------
 
@@ -267,6 +387,19 @@ class EffortRequest(BaseModel):
     effort: str = Field(pattern="^(fast|smart|genius)$")
 
 
+class ModeRequest(BaseModel):
+    mode: str = Field(pattern="^(ask|auto)$")
+
+
+class AttachRequest(BaseModel):
+    filename: str = Field(min_length=1)
+    data_b64: str = Field(min_length=1)
+
+
+class DeleteRequest(BaseModel):
+    session_id: str
+
+
 def build_chat_router(manager: ChatManager) -> APIRouter:
     router = APIRouter(prefix="/api/chat")
 
@@ -285,7 +418,7 @@ def build_chat_router(manager: ChatManager) -> APIRouter:
 
     @router.get("/sessions")
     def sessions() -> list[dict]:
-        return [
+        live = [
             {
                 "session_id": managed.id,
                 "title": managed.title,
@@ -297,6 +430,13 @@ def build_chat_router(manager: ChatManager) -> APIRouter:
             }
             for managed in reversed(list(manager.sessions.values()))
         ]
+        live_ids = {entry["session_id"] for entry in live}
+        saved = [
+            entry
+            for entry in manager.saved_sessions()
+            if entry["session_id"] not in live_ids
+        ]
+        return live + saved
 
     @router.post("/select")
     def select(body: SelectRequest) -> dict:
@@ -343,6 +483,38 @@ def build_chat_router(manager: ChatManager) -> APIRouter:
         managed = _current()
         managed.session.set_effort(body.effort)
         return _state(managed)
+
+    @router.post("/mode")
+    def switch_mode(body: ModeRequest) -> dict:
+        managed = _current()
+        managed.policy.mode = body.mode
+        managed.mode = body.mode
+        return _state(managed)
+
+    @router.post("/attach")
+    def attach(body: AttachRequest) -> dict:
+        managed = _current()
+        try:
+            raw = base64.b64decode(body.data_b64, validate=True)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(400, "Invalid base64 payload.") from exc
+        if len(raw) > _MAX_ATTACH_BYTES:
+            raise HTTPException(400, f"File too large (max {_MAX_ATTACH_BYTES} bytes).")
+        safe = re.sub(r"[^\w.\-]", "_", Path(body.filename).name) or "file"
+        uploads = managed.workspace / ".forge" / "uploads"
+        uploads.mkdir(parents=True, exist_ok=True)
+        target = uploads / f"{int(time.time())}_{safe}"
+        target.write_bytes(raw)
+        rel = str(target.relative_to(managed.workspace)).replace("\\", "/")
+        return {"path": rel}
+
+    @router.post("/delete")
+    def delete(body: DeleteRequest) -> dict:
+        manager.delete(body.session_id)
+        return {
+            "ok": True,
+            "current": manager.current.id if manager.current else None,
+        }
 
     @router.post("/model")
     def switch_model(body: ModelRequest) -> dict:

@@ -191,13 +191,29 @@ changing files) with enforcement, not hope:
   genius = intent brief (self-brief without a thinker), one completeness
   check pass that re-reads the request before the final answer, 1.5× steps.
 
-## Milestone 16 — Execution isolation & scale
+## ✅ Milestone 16 — Claude-style composer + real conversations
+- **Composer controls** (like Claude's chat box): ＋ image attach, Ask
+  first/Auto pill, Fast·Smart·Genius selector, Stop and ↑ send — all inside
+  the input box; top bar reduced to folder, model, Diff, Undo all; welcome
+  screen simplified to just folder + model.
+- **＋ attach images**: file picker → uploaded to `.forge/uploads/` in the
+  workspace → auto-mentioned so the vision model describes them; removable
+  chips shown above the input.
+- **Ask/Auto switchable mid-chat** (`POST /api/chat/mode`) — the permission
+  policy now carries its approver in both modes.
+- **Persistent conversations**: transcripts in `.forge/chat/` are listed in
+  the sidebar across app launches (empty ones skipped — no more phantom
+  "New conversation" rows), resume rebuilds the visible history (injected
+  context and corrective nudges stripped), and every row has a hover ✕
+  delete that removes the session and its transcript.
+
+## Milestone 17 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 17 — More agents & evaluation
+## Milestone 18 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness

@@ -48,12 +48,16 @@
   #new-chat:hover { background: var(--accent-strong); }
   #convos { flex: 1; overflow-y: auto; margin-top: 16px; display: flex; flex-direction: column; gap: 1px; }
   .convo {
-    padding: 8px 11px; border-radius: 8px; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 8px 8px 11px; border-radius: 8px; cursor: pointer;
     font-size: 13px; color: var(--dim); transition: background .12s, color .12s;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .convo:hover { background: var(--surface); color: var(--ink); }
   .convo.active { background: var(--accent-soft); color: var(--ink); }
+  .convo .ct { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .convo .cx { visibility: hidden; background: none; border: 0; color: var(--faint); cursor: pointer; font-size: 13px; padding: 0 3px; border-radius: 4px; flex-shrink: 0; }
+  .convo:hover .cx { visibility: visible; }
+  .convo .cx:hover { color: var(--err); }
   .convo .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); margin-right: 8px; animation: fadepulse 1.4s ease-in-out infinite; vertical-align: 1px; }
   @keyframes fadepulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
   .side-foot { border-top: 1px solid var(--line-soft); padding: 12px 8px 0; margin-top: 10px; font-size: 11.5px; color: var(--faint); line-height: 1.9; }
@@ -180,21 +184,44 @@
   #composer.on { display: block; }
   .comp-shell { max-width: 760px; margin: 0 auto; }
   .comp-box {
-    display: flex; align-items: flex-end; gap: 10px; background: var(--surface);
-    border: 1px solid var(--line); border-radius: 18px; padding: 12px 12px 12px 18px;
+    display: flex; flex-direction: column; gap: 8px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 18px; padding: 12px 12px 10px 16px;
     transition: border-color .15s;
   }
   .comp-box:focus-within { border-color: var(--accent-line); }
-  #input { flex: 1; background: none; border: 0; outline: none; color: var(--ink); font-family: var(--body); font-size: 14.5px; resize: none; max-height: 190px; line-height: 1.55; padding: 4px 0; }
+  #input { width: 100%; background: none; border: 0; outline: none; color: var(--ink); font-family: var(--body); font-size: 14.5px; resize: none; max-height: 190px; line-height: 1.55; padding: 2px 4px 0; }
   #input::placeholder { color: var(--faint); }
+  .comp-controls { display: flex; align-items: center; gap: 8px; }
+  .icon-btn {
+    border: 1px solid var(--line); background: none; color: var(--dim); border-radius: 50%;
+    width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center;
+    justify-content: center; font-size: 16px; cursor: pointer; transition: background .15s, color .15s;
+  }
+  .icon-btn:hover { background: var(--raise); color: var(--ink); }
+  .pill {
+    border: 1px solid var(--line); background: none; color: var(--dim); border-radius: 15px;
+    padding: 5px 13px; font-size: 12px; font-family: var(--body); cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .pill:hover { background: var(--raise); color: var(--ink); }
+  .pill.auto { border-color: var(--accent-line); color: var(--accent); }
+  .mini-seg { display: flex; border: 1px solid var(--line); border-radius: 15px; overflow: hidden; }
+  .mini-seg button { background: none; border: 0; color: var(--faint); padding: 5px 11px; font-size: 12px; font-family: var(--body); cursor: pointer; transition: background .15s, color .15s; }
+  .mini-seg button:hover { color: var(--ink); }
+  .mini-seg button.on { background: var(--accent-soft); color: var(--accent); }
+  #attach-chips { display: none; flex-wrap: wrap; gap: 6px; }
+  #attach-chips.on { display: flex; }
+  .a-chip { display: flex; align-items: center; gap: 6px; background: var(--bg-deep); border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; font-size: 11.5px; color: var(--dim); font-family: var(--mono); }
+  .a-chip button { background: none; border: 0; color: var(--faint); cursor: pointer; font-size: 12px; padding: 0; }
+  .a-chip button:hover { color: var(--err); }
   #send {
-    border: 0; border-radius: 50%; width: 36px; height: 36px; flex-shrink: 0;
+    border: 0; border-radius: 50%; width: 32px; height: 32px; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
-    background: var(--accent); color: #fff; font-size: 17px; cursor: pointer; transition: background .15s;
+    background: var(--accent); color: #fff; font-size: 16px; cursor: pointer; transition: background .15s;
   }
   #send:hover { background: var(--accent-strong); }
   #send:disabled { opacity: .35; cursor: default; }
-  #stop { display: none; background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 9px; padding: 8px 15px; font-size: 12.5px; font-family: var(--body); cursor: pointer; }
+  #stop { display: none; background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 15px; padding: 5px 13px; font-size: 12px; font-family: var(--body); cursor: pointer; }
   #stop:hover { border-color: var(--err); color: var(--err); }
   #stop.on { display: block; }
   .comp-hint { font-size: 11px; color: var(--faint); margin: 8px 6px 0; display: flex; gap: 18px; }
@@ -235,12 +262,6 @@
   <header id="topbar">
     <div class="chip" id="folder-chip" title="Change folder" onclick="goWelcome()">📁<span class="path" id="h-folder"></span></div>
     <select class="chip" id="h-model" title="Switch model (applies immediately)"></select>
-    <div class="seg"><button id="h-ask">ASK</button><button id="h-auto">AUTO</button></div>
-    <div class="seg">
-      <button id="h-fast" onclick="setEffort('fast')" title="Snappy">FAST</button>
-      <button id="h-smart" onclick="setEffort('smart')" title="Default">SMART</button>
-      <button id="h-genius" onclick="setEffort('genius')" title="Highest intelligence">GENIUS</button>
-    </div>
     <div class="spacer"></div>
     <button class="ghost" onclick="showDiff()">Diff</button>
     <button class="ghost" onclick="undoAll()">Undo all</button>
@@ -259,17 +280,6 @@
         <div id="recent"></div>
         <label class="lbl">Model — switch anytime</label>
         <select id="w-model"></select>
-        <label class="lbl">Permissions</label>
-        <div class="seg" style="width:max-content;margin-bottom:18px">
-          <button id="w-ask" class="on" onclick="setWMode('ask')">ASK BEFORE CHANGES</button>
-          <button id="w-auto" onclick="setWMode('auto')">AUTO-APPROVE</button>
-        </div>
-        <label class="lbl">Effort</label>
-        <div class="seg" style="width:max-content;margin-bottom:18px">
-          <button id="w-fast" onclick="setWEffort('fast')" title="Snappy: fewer aids, smaller step budget">FAST</button>
-          <button id="w-smart" class="on" onclick="setWEffort('smart')" title="Default: grounding + intent brief">SMART</button>
-          <button id="w-genius" onclick="setWEffort('genius')" title="Highest: dual-model reasoning, completeness check, biggest budget">GENIUS</button>
-        </div>
         <button class="go" id="w-go" onclick="startSession()">Start working</button>
         <div id="w-err"></div>
       </div>
@@ -280,11 +290,23 @@
 
   <div id="composer"><div class="comp-shell">
     <div class="comp-box">
+      <div id="attach-chips"></div>
       <textarea id="input" rows="1" placeholder="Ask anything, or tell Forge what to build…"></textarea>
-      <button id="stop" onclick="stopTurn()">Stop</button>
-      <button id="send" onclick="sendMessage()" aria-label="Send" title="Send">↑</button>
+      <div class="comp-controls">
+        <input type="file" id="file-in" accept="image/*" multiple hidden>
+        <button class="icon-btn" id="attach-btn" title="Attach images" onclick="pickImages()">＋</button>
+        <button class="pill" id="c-mode" onclick="toggleMode()" title="Whether Forge asks before file changes and commands">Ask first</button>
+        <div class="mini-seg" title="Effort level">
+          <button id="c-fast" onclick="setEffort('fast')">Fast</button>
+          <button id="c-smart" class="on" onclick="setEffort('smart')">Smart</button>
+          <button id="c-genius" onclick="setEffort('genius')">Genius</button>
+        </div>
+        <div class="spacer"></div>
+        <button id="stop" onclick="stopTurn()">Stop</button>
+        <button id="send" onclick="sendMessage()" aria-label="Send" title="Send">↑</button>
+      </div>
     </div>
-    <div class="comp-hint"><span>Enter to send · Shift+Enter for a new line</span><span>@file mentions</span><span>/diff · /undo · /run · /help</span></div>
+    <div class="comp-hint"><span>Enter to send · Shift+Enter for a new line</span><span>＋ attach images</span><span>@file mentions</span><span>/diff · /undo · /help</span></div>
   </div></div>
 </main>
 
@@ -313,7 +335,7 @@
 const LOGO = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5c1.3 6 4.5 9.2 10.5 10.5-6 1.3-9.2 4.5-10.5 10.5C10.7 16.5 7.5 13.3 1.5 12 7.5 10.7 10.7 7.5 12 1.5Z"/></svg>';
 const $ = (s) => document.querySelector(s);
 const esc = (t) => (t ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const S = { active:false, status:"idle", msgSeen:0, evtSeen:0, timer:null, workStart:0, wMode:"ask", wEffort:"smart", pollGen:0 };
+const S = { active:false, status:"idle", msgSeen:0, evtSeen:0, timer:null, workStart:0, wMode:"ask", wEffort:"smart", pollGen:0, sessionId:null, mode:"ask", attachments:[] };
 
 async function api(path, body) {
   const opts = body !== undefined
@@ -401,23 +423,52 @@ async function loadModels(selectId, chosen) {
       || "<option value=''>(no models — is Ollama running?)</option>";
   } catch (e) {}
 }
-function setWMode(mode) {
-  S.wMode = mode;
-  $("#w-ask").classList.toggle("on", mode === "ask");
-  $("#w-auto").classList.toggle("on", mode === "auto");
-}
-function setWEffort(level) {
+function syncEffortUI(level) {
   S.wEffort = level;
   for (const l of ["fast", "smart", "genius"])
-    $("#w-" + l).classList.toggle("on", l === level);
-}
-function syncEffortUI(level) {
-  for (const l of ["fast", "smart", "genius"])
-    $("#h-" + l).classList.toggle("on", l === level);
+    $("#c-" + l).classList.toggle("on", l === level);
 }
 async function setEffort(level) {
   try { const st = await api("/chat/effort", { effort: level }); syncEffortUI(st.effort); }
   catch (e) {}
+}
+function updateModeUI(mode) {
+  S.mode = mode;
+  const pill = $("#c-mode");
+  pill.textContent = mode === "auto" ? "Auto" : "Ask first";
+  pill.classList.toggle("auto", mode === "auto");
+}
+async function toggleMode() {
+  try {
+    const st = await api("/chat/mode", { mode: S.mode === "ask" ? "auto" : "ask" });
+    updateModeUI(st.mode);
+  } catch (e) {}
+}
+
+/* ── image attachments ───────────────────────────────────── */
+function pickImages() { $("#file-in").click(); }
+$("#file-in").addEventListener("change", async (ev) => {
+  for (const file of ev.target.files) {
+    try {
+      const data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(",")[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const r = await api("/chat/attach", { filename: file.name, data_b64: data });
+      S.attachments.push(r.path);
+    } catch (e) { addForge("Could not attach " + file.name + ": " + e.message, "error"); }
+  }
+  ev.target.value = "";
+  renderAttachChips();
+});
+function renderAttachChips() {
+  const box = $("#attach-chips");
+  box.classList.toggle("on", S.attachments.length > 0);
+  box.innerHTML = S.attachments.map((p, i) =>
+    `<span class="a-chip">▣ ${esc(p.split("/").pop())}<button title="Remove" onclick="S.attachments.splice(${i},1);renderAttachChips()">✕</button></span>`
+  ).join("");
 }
 
 /* ── session lifecycle ───────────────────────────────────── */
@@ -433,11 +484,13 @@ async function startSession() {
   finally { $("#w-go").disabled = false; }
 }
 async function newChat() {
-  const st = await api("/chat/start", { workspace: $("#h-folder").textContent, model: $("#h-model").value || null, mode: S.wMode, effort: S.wEffort });
+  const st = await api("/chat/start", { workspace: $("#h-folder").textContent, model: $("#h-model").value || null, mode: S.mode, effort: S.wEffort });
   enterChat(st);
 }
 function enterChat(st) {
-  S.active = true; S.msgSeen = 0; S.evtSeen = 0; S.status = "idle"; S.wMode = st.mode; S.pollGen++;
+  S.active = true; S.msgSeen = 0; S.evtSeen = 0; S.status = "idle"; S.pollGen++;
+  S.sessionId = st.session_id; S.attachments = [];
+  renderAttachChips();
   $("#welcome").style.display = "none";
   $("#sidebar").classList.add("on");
   $("#topbar").classList.add("on");
@@ -445,10 +498,8 @@ function enterChat(st) {
   $("#composer").classList.add("on");
   $("#lane").innerHTML = "";
   $("#h-folder").textContent = st.workspace;
-  $("#h-ask").classList.toggle("on", st.mode === "ask");
-  $("#h-auto").classList.toggle("on", st.mode === "auto");
-  S.wEffort = st.effort || "smart";
-  syncEffortUI(S.wEffort);
+  updateModeUI(st.mode || "ask");
+  syncEffortUI(st.effort || "smart");
   loadModels("h-model", st.model);
   refreshSessions();
   $("#input").focus();
@@ -466,19 +517,37 @@ async function refreshSessions() {
     const sessions = await api("/chat/sessions");
     $("#convos").innerHTML = sessions.map(s => `
       <div class="convo ${s.current ? "active" : ""}" onclick="selectSession('${s.session_id}')">
-        ${s.status === "working" ? '<span class="dot"></span>' : ""}${esc(s.title)}
+        ${s.status === "working" ? '<span class="dot"></span>' : ""}<span class="ct">${esc(s.title)}</span>
+        <button class="cx" title="Delete conversation" onclick="deleteConvo('${s.session_id}', event)">✕</button>
       </div>`).join("");
   } catch (e) {}
 }
 async function selectSession(id) {
-  const st = await api("/chat/select", { session_id: id });
-  enterChat(st);
+  try {
+    const st = await api("/chat/select", { session_id: id });
+    enterChat(st);
+  } catch (e) { refreshSessions(); }
+}
+async function deleteConvo(id, ev) {
+  ev.stopPropagation();
+  try {
+    const r = await api("/chat/delete", { session_id: id });
+    if (id === S.sessionId) {
+      if (r.current) selectSession(r.current); else goWelcome();
+    } else refreshSessions();
+  } catch (e) {}
 }
 
 /* ── messaging ───────────────────────────────────────────── */
 async function sendMessage() {
-  const text = $("#input").value.trim();
-  if (!text) return;
+  let text = $("#input").value.trim();
+  if (!text && !S.attachments.length) return;
+  if (S.attachments.length) {
+    const mentions = S.attachments.map(p => "@" + p).join(" ");
+    text = text ? mentions + "\n" + text : mentions + " — describe what you see.";
+    S.attachments = [];
+    renderAttachChips();
+  }
   $("#input").value = ""; autosize();
   try { await api("/chat/message", { text }); }
   catch (e) { addForge(e.message, "error"); }
@@ -615,6 +684,7 @@ async function poll(gen, fast) {
     else $("#ap-veil").classList.remove("on");
 
     if (st.effort) syncEffortUI(st.effort);
+    if (st.mode) updateModeUI(st.mode);
     $("#u-model").textContent = st.model;
     $("#u-in").textContent = st.usage.prompt_tokens.toLocaleString();
     $("#u-out").textContent = st.usage.completion_tokens.toLocaleString();
