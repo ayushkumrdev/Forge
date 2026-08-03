@@ -225,6 +225,71 @@ and efficiency*, not task success. The TSR claim must be earned at tier 2/3,
 where a failed edit or a hallucinated import actually costs the run. That is
 the next experiment, and it is an overnight job (see §5).
 
+### 3.5c The full-suite sweep — a negative result, and what it means
+
+All 3 tiers × 7 configurations × 3 seeds = 147 runs, qwen2.5-coder:7b,
+effort=smart. **The headline is a benchmark failure, not an agent result.**
+
+| config | TSR | T1 | T2 | T3 | ADT | FVR ↓ | HIR | WCR ↓ |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| all-gates | 23.8% | 5/9 | **0/6** | 0/6 | 75% | **38%** | 0% | 12% |
+| no-syntax | 28.6% | 6/9 | 0/6 | 0/6 | 86% | 43% | 0% | 11% |
+| no-edit-repair | 28.6% | 6/9 | 0/6 | 0/6 | 76% | 36% | 0% | 11% |
+| no-action-gate | 28.6% | 6/9 | 0/6 | 0/6 | 71% | **67%** | 0% | 6% |
+| no-preflight | 33.3% | 6/9 | 0/6 | 1/6 | 95% | 33% | 0% | 7% |
+| no-resolution | 28.6% | 5/9 | 0/6 | 1/6 | 75% | 53% | 0% | 13% |
+| no-gates | 28.6% | 5/9 | 0/6 | 1/6 | 65% | 45% | 0% | 4% |
+
+**T2 is 0/6 in every single configuration and T3 is at most 1/6.** That is a
+floor effect, and it is exactly as uninformative as SWE-bench's ceiling
+effect — the failure SWE-micro was built to avoid. A tier that no
+configuration ever solves cannot discriminate between configurations, so
+**no TSR claim can be made from this run either**. The benchmark, not the
+agent, is what needs fixing first.
+
+**Root cause of the T2 floor (diagnosed on `t2-wire-validator`).** The task
+has two parts: add `validate_email()`, then make `register()` reject a bad
+address. The model completes part 1 — 3 of the 4 hidden tests pass — and then
+**drifts onto self-invented work** ("Step 3: add a test for validate_email")
+instead of finishing part 2. The failure is not hallucination and not a bad
+edit; it is **partial completion with task drift** on a multi-part
+instruction. Every existing gate is blind to it: the code it wrote is
+syntactically valid, resolves, and landed on real text.
+
+**This names a gap in the contribution list.** Forge verifies that each
+*action* is sound but never that the *request* was covered. The completeness
+check added for `genius` effort is the only mechanism aimed at this, and the
+sweep never exercised it (it ran at `smart`). Two consequences:
+
+1. ~~Run the effort comparison first~~ **— done, and the hypothesis is
+   refuted.** `genius` on tier 2 (2 seeds): **0/4, identical to `smart`.**
+   The completeness check pushed ADT to 100% and WCR to 0% — the model always
+   acted and never thrashed — and still solved nothing. A prompt-level
+   "re-read the request" nudge does not produce requirement coverage. This is
+   the project's recurring lesson applied to itself: **the fix has to be
+   structural, not a stronger instruction.** C9 is therefore promoted from
+   "nice to have" to the critical path, and it must be built as a real
+   checklist the turn cannot end without satisfying, not as another nudge.
+2. **Add a T1.5 tier**: two-part single-file tasks, to sit in the gap
+   between "edit one function" (67% solved) and "coordinate two files" (0%).
+   A benchmark needs a rung the system passes *sometimes*.
+
+**HIR was 0% everywhere again**, even on cross-file tasks — because the runs
+never got far enough to write a cross-module import. The metric remains
+unexercised, and reporting it as "no hallucinations" would be dishonest.
+
+**What did replicate:** the honesty effect. `all-gates` FVR 38% vs
+`no-action-gate` 67%, the same direction and rough magnitude as tier 1. The
+action gate's effect on truthfulness is now the one finding observed twice,
+across different task difficulties.
+
+### C9 — Requirement coverage verification (new, promoted by 3.5c)
+Decompose the request into its atomic requirements before work starts, and
+verify each one is satisfied before the turn may end — the missing rung that
+checks the *request* rather than the *action*. The thinker model already
+produces a structured brief (INTENT/STEPS/WHERE/VERIFY); the steps are a
+requirement list waiting to be used as a checklist rather than a hint.
+
 ### 3.6 What the first numbers already tell us
 
 - The remaining tier-1 failure is **deflection, not capability**: ADT 0% on
