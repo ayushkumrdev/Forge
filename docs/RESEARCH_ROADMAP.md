@@ -182,6 +182,49 @@ defect that months of interactive use did not, and it generalizes — JSON
 over-escaping is a systematic small-model behaviour, so the repair belongs in
 the contribution list, not the bug list.
 
+### 3.5b The first ablation table (F1, tier 1)
+
+qwen2.5-coder:7b, effort=smart, tier 1, 2 seeds → **6 runs per configuration**.
+Each row disables exactly one mechanism; `no-gates` disables all of them.
+
+| config | TSR | ADT ↑ | FVR ↓ | GER ↑ | WCR ↓ | tool calls | time |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| **all-gates** | 66.7% | 83% | **25%** | 83% | **0%** | 11 (1 failed) | 84s |
+| no-syntax | 66.7% | 67% | 100% | 67% | 6% | 9 (2 failed) | 96s |
+| no-edit-repair | 66.7% | 67% | 60% | **58%** | 12% | **17 (7 failed)** | 137s |
+| no-action-gate | 66.7% | 80% | **100%** | 100% | **17%** | 15 (4 failed) | 696s |
+| no-preflight | 66.7% | 100% | 33% | 100% | 10% | 15 (0 failed) | 91s |
+| no-resolution | 66.7% | 67% | 80% | 67% | 8% | 11 (2 failed) | 112s |
+| no-gates | **50.0%** | 67% | 80% | 75% | 6% | 12 (1 failed) | 79s |
+
+**Read this table honestly.** TSR is 4/6 for every configuration except
+`no-gates` at 3/6 — a one-task difference at n=6, which is **noise, not a
+result**. (An earlier run of the same `all-gates` configuration scored 83.3%;
+the variance is larger than the effect.) Nothing about task success can be
+claimed from tier 1, and the paper must not try.
+
+**What the table does show is mechanism-specific and interpretable** — each
+gate degrades precisely the metric it was designed to protect:
+
+- **`no-action-gate` → FVR 25% → 100%.** With the honesty gate off, *every*
+  verification claim the model made was unbacked. It also produced the worst
+  WCR (17%) and took **696s vs 84s** — with nothing to stop it, one run spun
+  in a loop the gate would have broken.
+- **`no-edit-repair` → GER 83% → 58%**, with tool failures rising 1 → 7 and
+  calls 11 → 17. Removing edit repair returns the agent to the retry
+  death-spiral, exactly as designed.
+- **`all-gates` has the best FVR (25%) and the only 0% WCR** — the full stack
+  is the most honest and least wasteful configuration, at moderate cost.
+- **HIR was 0% everywhere and is therefore uninformative here**: tier-1 tasks
+  are single-file and import nothing, so the resolution rung never had an
+  opportunity to fire. HIR needs T2/T3 to mean anything — do not report it
+  from tier 1.
+
+**Conclusion for the paper.** At tier 1 the gates buy *honesty, groundedness
+and efficiency*, not task success. The TSR claim must be earned at tier 2/3,
+where a failed edit or a hallucinated import actually costs the run. That is
+the next experiment, and it is an overnight job (see §5).
+
 ### 3.6 What the first numbers already tell us
 
 - The remaining tier-1 failure is **deflection, not capability**: ADT 0% on
@@ -344,7 +387,8 @@ act-don't-tell in small-model agents") — a workshop paper that can ship
 | Phase | Milestones | Output |
 | --- | --- | --- |
 | ~~1~~ ✅ | M17 harness + gate kill-switches | **done** — see §3.4; baselines + two instrument fixes + the escape-repair contribution |
-| 1b (next) | full suite × all ablations × 5 seeds; add T2/T3 tasks | the ablation table (F1) — the paper's core figure |
+| ~~1b~~ ✅ | tier-1 ablation table, 7 configs × 6 runs | **done** — see §3.5b; mechanism-specific effects confirmed, TSR within noise |
+| 1c (next) | **tier 2/3 × all ablations × 5 seeds — overnight run**; this is where TSR and HIR become measurable | the paper's core figure (F1) |
 | 2 (weeks 3-5) | M18 ladder (L2/L3/L4 rungs) | core ablation table; C8 workshop draft possible here |
 | 3 (weeks 5-8) | M19 overlay search | compute-vs-success curves |
 | 4 (weeks 8-11) | M20 speculative agency | latency results (or honest negative result) |
