@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from forge.agents.base import constrained_tool_retry, recover_inline_tool_call
+from forge.chat.formatting import normalize_markdown
 from forge.chat.instructions import load_project_instructions
 from forge.config import ForgeSettings
 from forge.llm.base import ChatMessage, LLMClient, Usage
@@ -441,7 +442,9 @@ class ChatSession:
                     )
 
             if not message.tool_calls:
-                content = _SPECIAL_TOKEN_RE.sub("", message.content).strip()
+                content = normalize_markdown(
+                    _SPECIAL_TOKEN_RE.sub("", message.content).strip()
+                )
                 if not content and not nudged:
                     # empty/garbage reply (template-token leak): one retry nudge
                     nudged = True

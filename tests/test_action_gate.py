@@ -79,8 +79,11 @@ def test_explanations_are_never_bounced(workspace):
     llm = MockLLMClient([ChatMessage(role="assistant", content=example)])
     session = _session(workspace, llm)
     reply = session.send("how do python decorators work?")
-    assert reply == example
-    assert len(llm.requests) == 1  # no retry happened
+    assert len(llm.requests) == 1  # accepted first time: no bounce
+    assert "Decorators wrap functions:" in reply
+    assert "@wraps(f)" in reply
+    # the formatter separates the fence from the prose above it
+    assert "functions:\n\n```python" in reply
 
 
 def test_fences_fine_after_a_real_change(workspace):
