@@ -12,7 +12,7 @@ from rich.table import Table
 
 from forge import __version__
 from forge.config import ForgeSettings
-from forge.llm.ollama import OllamaClient
+from forge.llm.factory import make_client
 from forge.memory.store import MemoryStore
 from forge.orchestrator.loop import ExecutionLoop
 from forge.repo.scanner import RepoScanner
@@ -33,14 +33,8 @@ def _settings(model: Optional[str] = None) -> ForgeSettings:
     return settings
 
 
-def _client(settings: ForgeSettings) -> OllamaClient:
-    return OllamaClient(
-        host=settings.ollama_host,
-        model=settings.model,
-        temperature=settings.temperature,
-        num_ctx=settings.num_ctx,
-        timeout_s=settings.request_timeout_s,
-    )
+def _client(settings: ForgeSettings):
+    return make_client(settings)
 
 
 @app.command()
@@ -54,11 +48,16 @@ def doctor(model: Optional[str] = typer.Option(None, help="Model to check for.")
     """Check that Ollama is reachable and the configured model is available."""
     settings = _settings(model)
     client = _client(settings)
+    endpoint = (
+        settings.openai_base_url if settings.provider == "openai" else settings.ollama_host
+    )
+    backend = "LLM server" if settings.provider == "openai" else "Ollama"
     if not client.ping():
-        console.print(f"[red][FAIL] Ollama is not reachable at {settings.ollama_host}[/red]")
-        console.print("  Start it with: [bold]ollama serve[/bold]")
+        console.print(f"[red][FAIL] {backend} is not reachable at {endpoint}[/red]")
+        if settings.provider != "openai":
+            console.print("  Start it with: [bold]ollama serve[/bold]")
         raise typer.Exit(1)
-    console.print(f"[green][OK] Ollama reachable at {settings.ollama_host}[/green]")
+    console.print(f"[green][OK] {backend} reachable at {endpoint}[/green]")
     models = client.list_models()
     if settings.model in models:
         console.print(f"[green][OK] Model {settings.model} is available[/green]")
@@ -66,7 +65,8 @@ def doctor(model: Optional[str] = typer.Option(None, help="Model to check for.")
         console.print(
             f"[red][FAIL] Model {settings.model} not found.[/red] Available: {', '.join(models)}"
         )
-        console.print(f"  Pull it with: [bold]ollama pull {settings.model}[/bold]")
+        if settings.provider != "openai":
+            console.print(f"  Pull it with: [bold]ollama pull {settings.model}[/bold]")
         raise typer.Exit(1)
 
 

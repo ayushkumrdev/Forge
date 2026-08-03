@@ -19,6 +19,7 @@ _WINDOW_LINES = 60
 _WINDOW_OVERLAP = 10
 _MAX_CHUNK_LINES = 120
 _RRF_K = 60  # standard reciprocal-rank-fusion constant
+_PREFLIGHT_MAX_CHARS = 2_400
 
 
 class Chunk(BaseModel):
@@ -78,6 +79,35 @@ class RetrievalEngine:
                 fused[index] = fused.get(index, 0.0) + 1.0 / (_RRF_K + rank + 1)
         ordered = sorted(fused.items(), key=lambda pair: -pair[1])
         return [(self.chunks[index], score) for index, score in ordered[:k]]
+
+    def preflight(
+        self, query: str, k: int = 3, max_chars: int = _PREFLIGHT_MAX_CHARS
+    ) -> str:
+        """Prompt-ready block of the code most relevant to `query`, injected
+        BEFORE the model generates so it works from the repository's real APIs
+        instead of remembered ones. Empty when nothing matches (BM25-gated, so
+        small talk injects nothing)."""
+        if not self.chunks or not self._bm25.top(query, 1):
+            return ""
+        blocks: list[str] = []
+        used = 0
+        for chunk, _score in self.search(query, k):
+            block = f"### {chunk.location}\n```\n{chunk.text}\n```"
+            if used + len(block) > max_chars:
+                if blocks:
+                    break
+                # even the best chunk overflows: keep its head so the model
+                # still sees real code rather than nothing
+                keep = max_chars - len("### \n```\n\n``` [truncated]") - len(chunk.location)
+                block = (
+                    f"### {chunk.location}\n```\n{chunk.text[:keep]}\n``` [truncated]"
+                )
+            blocks.append(block)
+            used += len(block)
+        return (
+            "## Relevant code from the repository (auto-retrieved; verify with "
+            "read_file before editing)\n" + "\n".join(blocks)
+        )
 
 
 def _chunk_file(file: FileInfo, lines: list[str]) -> list[Chunk]:

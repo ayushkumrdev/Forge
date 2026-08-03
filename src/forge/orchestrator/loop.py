@@ -9,6 +9,7 @@ Every run produces a RunReport persisted to .forge/runs/<run_id>.json."""
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -40,8 +41,30 @@ from forge.tools.filesystem import (
 from forge.tools.git_tool import GitTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
-from forge.tools.terminal import RunCommandTool
+from forge.tools.terminal import PowerShellTool, RunCommandTool
 from forge.tools.web import FetchUrlTool
+
+
+def ground_target_files(plan: Plan, known_files: set[str]) -> None:
+    """Grounding: the planner's target_files are best guesses — annotate the
+    ones that do not exist so the coder knows it is CREATING a file, not
+    editing something the planner hallucinated."""
+    for task in plan.tasks:
+        task.target_files = [
+            path
+            if path.replace("\\", "/") in known_files
+            else f"{path} (new file — does not exist yet)"
+            for path in task.target_files
+        ]
+
+
+def retry_temperature(base: float, attempt: int) -> float | None:
+    """Verifier-guided sampling diversity: attempt 1 runs at the configured
+    temperature; each retry after a rejection samples hotter, so the coder
+    explores instead of deterministically repeating the same failure."""
+    if attempt <= 1:
+        return None
+    return round(min(base + 0.3 * (attempt - 1), 0.9), 2)
 
 
 class TaskResult(BaseModel):
@@ -86,6 +109,7 @@ class ExecutionLoop:
 
         self._llm = llm
         self._memory = ExecutionMemory(store) if store is not None else None
+        self._engine: RetrievalEngine | None = None
         self._guard = SafetyGuard(self.workspace)
         self.ledger = ChangeLedger(self.workspace, self.run_id)
         self._registry = self._build_registry()
@@ -101,22 +125,25 @@ class ExecutionLoop:
         self.reviewer = Reviewer(llm, self.recorder)
 
     def _build_registry(self) -> ToolRegistry:
-        return ToolRegistry(
-            [
-                ReadFileTool(self._guard),
-                WriteFileTool(self._guard, self.ledger),
-                EditFileTool(self._guard, self.ledger),
-                DeleteFileTool(self._guard, self.ledger),
-                ListDirTool(self._guard),
-                RunCommandTool(
-                    self._guard, self.workspace, self.settings.command_timeout_s
-                ),
-                GrepTool(self.workspace),
-                GlobTool(self.workspace),
-                GitTool(self.workspace),
-                FetchUrlTool(),
-            ]
-        )
+        tools = [
+            ReadFileTool(self._guard),
+            WriteFileTool(self._guard, self.ledger, self.settings.syntax_gate),
+            EditFileTool(self._guard, self.ledger, self.settings.syntax_gate),
+            DeleteFileTool(self._guard, self.ledger),
+            ListDirTool(self._guard),
+            RunCommandTool(
+                self._guard, self.workspace, self.settings.command_timeout_s
+            ),
+            GrepTool(self.workspace),
+            GlobTool(self.workspace),
+            GitTool(self.workspace),
+            FetchUrlTool(),
+        ]
+        if os.name == "nt":
+            tools.append(
+                PowerShellTool(self._guard, self.workspace, self.settings.command_timeout_s)
+            )
+        return ToolRegistry(tools)
 
     def run(self, request: str) -> RunReport:
         started = time.monotonic()
@@ -136,6 +163,7 @@ class ExecutionLoop:
             self._registry.register(WhoImportsTool(snapshot))
             engine = RetrievalEngine(self.workspace, embedder=self._embedder())
             chunk_count = engine.build(snapshot)
+            self._engine = engine
             self._registry.register(SearchCodeTool(engine))
             self.recorder.event("orchestrator", "retrieval_ready", chunks=chunk_count)
 
@@ -146,6 +174,9 @@ class ExecutionLoop:
                     self.recorder.event("orchestrator", "lessons_recalled")
 
             plan = self.planner.plan(request, repo_summary, lessons)
+            ground_target_files(
+                plan, {f.path.replace("\\", "/") for f in snapshot.files}
+            )
             report.plan_summary = plan.summary
             report.usage.add(self.planner.usage)
 
@@ -189,8 +220,22 @@ class ExecutionLoop:
         review: Review | None = None
         outcome = None
 
+        # pre-flight: put the real relevant code in front of the coder before
+        # it generates, so it cannot hallucinate the repository's APIs
+        context = (
+            self._engine.preflight(f"{task.title}\n{task.description}") or None
+            if self._engine is not None
+            else None
+        )
         for attempt in range(1, self.settings.max_review_cycles + 1):
-            outcome = self.coder.execute(task, plan, repo_summary, feedback)
+            outcome = self.coder.execute(
+                task,
+                plan,
+                repo_summary,
+                feedback,
+                context,
+                temperature=retry_temperature(self.settings.temperature, attempt),
+            )
             usage.add(outcome.usage)
 
             check_results = self._run_checks()

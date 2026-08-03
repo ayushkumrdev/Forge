@@ -21,9 +21,9 @@ Every module is designed to be replaced independently as later milestones land.
 | Module | Responsibility | Replaceable by (roadmap) |
 | --- | --- | --- |
 | `forge.config` | Env-overridable settings (pydantic-settings) | — |
-| `forge.llm` | `LLMClient` interface, Ollama impl, mock, JSON extraction | any provider (OpenAI-compatible, llama.cpp, …) |
+| `forge.llm` | `LLMClient` interface; Ollama + OpenAI-compatible impls behind `factory.make_client`, mock, JSON extraction, grammar-constrained retry helpers | more providers |
 | `forge.safety` | Command blocklist, path confinement, VCS protection | policy engine |
-| `forge.tools` | `Tool` interface + registry, `ChangeLedger`, fs/terminal/search/git tools | Docker executor, patch tool, browser |
+| `forge.tools` | `Tool` interface + registry, `ChangeLedger`, syntax gate (`syntax_check`), self-repairing edits (`edit_repair`), fs/terminal/search/git tools | Docker executor, patch tool, browser |
 | `forge.repo` | Scanner: tree, language stats, Python `ast` symbols | tree-sitter multi-language, Neo4j graphs |
 | `forge.agents` | `ToolLoopAgent` engine; Planner / Coder / Reviewer | more agents (research, docs, git) |
 | `forge.orchestrator` | plan → code → check → review → iterate loop | Celery/Temporal task graph |

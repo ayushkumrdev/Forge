@@ -9,13 +9,17 @@ content, and long conversations are compacted with an LLM summary."""
 from __future__ import annotations
 
 import json
+import os
+import platform
 import re
+import sys
 from pathlib import Path
 
-from forge.agents.base import recover_inline_tool_call
+from forge.agents.base import constrained_tool_retry, recover_inline_tool_call
 from forge.chat.instructions import load_project_instructions
 from forge.config import ForgeSettings
 from forge.llm.base import ChatMessage, LLMClient, Usage
+from forge.llm.json_utils import looks_like_tool_call
 from forge.memory.store import MemoryStore
 from forge.safety.guard import SafetyGuard
 from forge.safety.permissions import PermissionPolicy
@@ -33,7 +37,7 @@ from forge.tools.filesystem import (
 from forge.tools.git_tool import GitTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
-from forge.tools.terminal import RunCommandTool
+from forge.tools.terminal import PowerShellTool, RunCommandTool
 from forge.tools.web import FetchUrlTool
 
 CHAT_SYSTEM = """You are Forge, an elite autonomous AI software engineer running \
@@ -55,15 +59,19 @@ Example — read, then edit:
 ## Prime directives
 1. ACT yourself. NEVER ask the user to paste code, apply a change, or run a
    command — you have tools for all of it.
-2. Truth comes from tools, never from memory. Read files before talking about
+2. Words don't change files; tool calls do. NEVER paste code into the chat
+   for the user to apply, and NEVER say "I will now edit X" as your reply —
+   if code belongs in a file, put it there with edit_file/write_file THIS
+   step. A reply that shows code without having written it is a failure.
+3. Truth comes from tools, never from memory. Read files before talking about
    them. Never invent files, functions, or APIs — verify with find_symbol or
    grep first.
-3. Finish the WHOLE request. Before your final answer, re-read the request
+4. Finish the WHOLE request. Before your final answer, re-read the request
    and confirm every part is done.
-4. Verify your work: run the project's tests, or at least
+5. Verify your work: run the project's tests, or at least
    `python -m py_compile <file>` after changing Python. Never declare success
    while checks fail.
-5. Keep changes minimal and in the repository's existing style — match its
+6. Keep changes minimal and in the repository's existing style — match its
    indentation, naming, imports, and patterns.
 
 ## Workflow for every coding task
@@ -88,9 +96,10 @@ Example — read, then edit:
 
 ## Tools available
 read_file · write_file · edit_file · delete_file · list_dir · run_command ·
-grep · find_files · search_code (by meaning) · find_symbol (find definitions) ·
-who_imports (what depends on a file) · git (status/diff/log/add/commit) ·
-fetch_url (read documentation from the web)
+run_powershell (full PowerShell on Windows: file ops, processes, env,
+package managers) · grep · find_files · search_code (by meaning) ·
+find_symbol (find definitions) · who_imports (what depends on a file) ·
+git (status/diff/log/add/commit) · fetch_url (read documentation from the web)
 
 ## Style
 Direct and concise, no filler. Answer questions crisply; for work, lead with
@@ -102,7 +111,58 @@ _MENTION_RE = re.compile(r"@([\w\-./\\]+\.[\w]+)")
 _KEEP_RECENT_ON_COMPACT = 8
 _MAX_MENTION_CHARS = 6_000
 # qwen occasionally leaks chat-template tokens into long tool conversations
-_SPECIAL_TOKEN_RE = re.compile(r"<\|im_start\|>|<\|im_end\|>|<\|endoftext\|>")
+_SPECIAL_TOKEN_RE = re.compile(
+    r"<\|im_start\|>|<\|im_end\|>|<\|endoftext\|>|</?tool_response>|</?tool_call>"
+)
+
+# -- act-don't-tell enforcement ---------------------------------------------------
+# The classic small-model deflection: asked to change code, it pastes the code
+# into chat (or promises to do it) instead of calling tools. The gate refuses
+# to accept such a reply as final while nothing was actually changed.
+
+_ACTION_REQUEST_RE = re.compile(
+    r"\b(add|fix|write|create|implement|refactor|change|update|remove|delete|"
+    r"rename|move|install|build|convert|replace|improve|optimi[sz]e|correct|"
+    r"patch|apply|extract|split|merge|migrate|upgrade|set up|clean up)\b",
+    re.IGNORECASE,
+)
+_CODE_FENCE_RE = re.compile(r"```[\w+-]*\n.+?```", re.DOTALL)
+_PROMISE_RE = re.compile(
+    r"\b(?:i\s*(?:'ll|will)|let\s+me|i\s*(?:'m|am)\s+going\s+to|"
+    r"i\s+can\s+now|next,?\s+i)\b[^.!\n]{0,80}?"
+    r"\b(?:writ|edit|creat|add|fix|updat|chang|implement|appl|refactor|run|mak)",
+    re.IGNORECASE,
+)
+_MAX_ACTION_NUDGES = 2
+
+_PASTED_CODE_NUDGE = (
+    "You pasted code into the chat instead of applying it. The user asked you "
+    "to make this change — you have tools, so make it yourself NOW: call "
+    "edit_file or write_file with that exact code, then verify with "
+    "run_command. Do not reply in plain text until the change is actually in "
+    "the repository files."
+)
+_PROMISE_NUDGE = (
+    "You described what you would do instead of doing it. Execute it NOW with "
+    "tool calls (read_file, edit_file, write_file, run_command). Do not "
+    "narrate the plan; perform it, then report what changed."
+)
+
+# claiming verification that never happened is the purest hallucination —
+# catch replies that say tests/checks ran when no command ran this turn
+_FALSE_VERIFICATION_RE = re.compile(
+    r"\b(?:ran|run(?:ning)?)\b[^.\n]{0,50}\b(?:tests?|checks?|pytest|linter)\b"
+    r"|\b(?:tests?|checks?)\s+(?:pass(?:ed)?|succeed(?:ed)?)\b"
+    r"|\bno\s+errors?\s+(?:found|reported)\b"
+    r"|\bverified\b[^.\n]{0,50}\b(?:running|tests?|command)\b",
+    re.IGNORECASE,
+)
+_FALSE_CLAIM_NUDGE = (
+    "You claimed the tests/checks ran, but you did NOT run any command this "
+    "turn. Run them NOW with run_command and report the actual output — or "
+    "state plainly that you did not run them. Never claim verification you "
+    "have not performed."
+)
 
 
 class ChatSession:
@@ -134,8 +194,12 @@ class ChatSession:
         tree = self.snapshot.tree
         if len(tree) > _TREE_IN_PROMPT_CHARS:
             tree = tree[:_TREE_IN_PROMPT_CHARS] + "\n... [tree truncated]"
+        shells = "run_command (cmd.exe) and run_powershell" if os.name == "nt" else "run_command"
         self._system = (
             CHAT_SYSTEM
+            + f"\n\n## Environment\nOS: {platform.system()} {platform.release()} · "
+            f"Python {sys.version.split()[0]} · shell tools: {shells}. "
+            "Use the right syntax for this OS."
             + f"\n\n## Repository ({self.workspace})\n{tree}"
         )
         instructions = load_project_instructions(self.workspace)
@@ -154,34 +218,47 @@ class ChatSession:
         self.snapshot = snapshot
         engine = RetrievalEngine(self.workspace)
         engine.build(snapshot)
-        return ToolRegistry(
-            [
-                ReadFileTool(self._guard),
-                WriteFileTool(self._guard, self.ledger),
-                EditFileTool(self._guard, self.ledger),
-                DeleteFileTool(self._guard, self.ledger),
-                ListDirTool(self._guard),
-                RunCommandTool(self._guard, self.workspace, self.settings.command_timeout_s),
-                GrepTool(self.workspace),
-                GlobTool(self.workspace),
-                GitTool(self.workspace),
-                FindSymbolTool(snapshot),
-                WhoImportsTool(snapshot),
-                SearchCodeTool(engine),
-                FetchUrlTool(),
-            ],
-            policy=policy,
-        )
+        self._engine = engine
+        tools = [
+            ReadFileTool(self._guard),
+            WriteFileTool(self._guard, self.ledger, self.settings.syntax_gate),
+            EditFileTool(self._guard, self.ledger, self.settings.syntax_gate),
+            DeleteFileTool(self._guard, self.ledger),
+            ListDirTool(self._guard),
+            RunCommandTool(self._guard, self.workspace, self.settings.command_timeout_s),
+            GrepTool(self.workspace),
+            GlobTool(self.workspace),
+            GitTool(self.workspace),
+            FindSymbolTool(snapshot),
+            WhoImportsTool(snapshot),
+            SearchCodeTool(engine),
+            FetchUrlTool(),
+        ]
+        if os.name == "nt":
+            tools.append(
+                PowerShellTool(self._guard, self.workspace, self.settings.command_timeout_s)
+            )
+        return ToolRegistry(tools, policy=policy)
 
     # -- conversation ------------------------------------------------------------
 
     def send(self, user_text: str) -> str:
         """One user turn: run the tool loop until the model answers in text."""
-        self.history.append(
-            ChatMessage(role="user", content=self._expand_mentions(user_text))
-        )
+        expanded = self._expand_mentions(user_text)
+        if expanded == user_text:
+            # no @file context supplied -> pre-flight retrieval puts the real
+            # relevant code in front of the model before it generates
+            context = self._engine.preflight(user_text)
+            if context:
+                expanded += "\n\n" + context
+        self.history.append(ChatMessage(role="user", content=expanded))
         self._maybe_compact()
 
+        # arm the act-don't-tell gate when this turn asks for a change
+        action_turn = _ACTION_REQUEST_RE.search(user_text) is not None
+        turn_mutated = False
+        turn_ran_command = False
+        corrections = 0
         nudged = False
         for _step in range(self.settings.max_agent_steps):
             if self._cancelled():
@@ -197,6 +274,23 @@ class ChatSession:
             if self._cancelled():
                 return self._finish_stopped()
             message = recover_inline_tool_call(response.message, self.registry.names())
+            if (
+                not message.tool_calls
+                and message.content
+                and looks_like_tool_call(message.content, self.registry.names())
+            ):
+                retried = constrained_tool_retry(
+                    self.llm,
+                    [ChatMessage(role="system", content=self._system), *self.history],
+                    self.registry.specs(),
+                    self.registry.names(),
+                )
+                if retried is not None:
+                    message, retry_usage = retried
+                    self.usage.add(retry_usage)
+                    self.recorder.event(
+                        "chat", "constrained_tool_retry", tool=message.tool_calls[0].name
+                    )
 
             if not message.tool_calls:
                 content = _SPECIAL_TOKEN_RE.sub("", message.content).strip()
@@ -211,6 +305,22 @@ class ChatSession:
                         )
                     )
                     continue
+                correction = None
+                if action_turn and corrections < _MAX_ACTION_NUDGES:
+                    if not turn_mutated:
+                        correction = self._deflection(content)
+                    if (
+                        correction is None
+                        and not turn_ran_command
+                        and _FALSE_VERIFICATION_RE.search(content)
+                    ):
+                        correction = _FALSE_CLAIM_NUDGE
+                if correction:
+                    corrections += 1
+                    self.recorder.event("chat", "action_gate_nudge", attempt=corrections)
+                    self.history.append(message.model_copy(update={"content": content}))
+                    self.history.append(ChatMessage(role="user", content=correction))
+                    continue
                 self.history.append(message.model_copy(update={"content": content}))
                 self.save_transcript()
                 return content
@@ -219,6 +329,10 @@ class ChatSession:
             for call in message.tool_calls:
                 self.recorder.event("chat", "tool_call", tool=call.name, arguments=call.arguments)
                 result = self.registry.execute(call.name, call.arguments)
+                if result.ok and self.registry.is_mutating(call.name):
+                    turn_mutated = True
+                if result.ok and call.name in ("run_command", "run_powershell"):
+                    turn_ran_command = True
                 self.recorder.event(
                     "chat",
                     "tool_result",
@@ -239,6 +353,17 @@ class ChatSession:
         note = "Stopped: step budget exhausted for this turn."
         self.history.append(ChatMessage(role="assistant", content=note))
         return note
+
+    @staticmethod
+    def _deflection(content: str) -> str | None:
+        """Classify a would-be final reply on an action turn where nothing was
+        changed: pasted code or a promise of future action gets the matching
+        corrective nudge; None means the reply is acceptable."""
+        if _CODE_FENCE_RE.search(content):
+            return _PASTED_CODE_NUDGE
+        if _PROMISE_RE.search(content):
+            return _PROMISE_NUDGE
+        return None
 
     def _cancelled(self) -> bool:
         return self.should_stop is not None and self.should_stop()
@@ -268,9 +393,22 @@ class ChatSession:
 
     # -- compaction ----------------------------------------------------------------
 
+    def _estimated_tokens(self) -> int:
+        """Cheap upper-bound estimate (~4 chars/token) of what the next request
+        will occupy: system prompt plus the whole history."""
+        chars = len(self._system) + sum(
+            len(m.content) + sum(len(str(tc.arguments)) for tc in m.tool_calls)
+            for m in self.history
+        )
+        return chars // 4
+
     def _maybe_compact(self, force: bool = False) -> bool:
-        threshold = self.settings.chat_compact_threshold
-        if not force and len(self.history) <= threshold:
+        # compact on EITHER trigger: too many messages, or the estimated token
+        # footprint nearing the context window (long tool outputs can blow the
+        # context in far fewer messages than the count threshold)
+        over_messages = len(self.history) > self.settings.chat_compact_threshold
+        over_tokens = self._estimated_tokens() > int(self.settings.num_ctx * 0.75)
+        if not force and not over_messages and not over_tokens:
             return False
         old = self.history[:-_KEEP_RECENT_ON_COMPACT]
         recent = self.history[-_KEEP_RECENT_ON_COMPACT:]

@@ -61,6 +61,10 @@ class ToolRegistry:
     def names(self) -> list[str]:
         return list(self._tools)
 
+    def is_mutating(self, name: str) -> bool:
+        tool = self._tools.get(name)
+        return tool is not None and tool.mutating
+
     def execute(self, name: str, arguments: dict[str, Any]) -> ToolResult:
         tool = self._tools.get(name)
         if tool is None:

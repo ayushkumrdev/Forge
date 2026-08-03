@@ -64,6 +64,8 @@ class Coder:
         plan: Plan,
         repo_summary: str,
         feedback: str | None = None,
+        context: str | None = None,
+        temperature: float | None = None,
     ) -> AgentOutcome:
         sections = [
             f"## Overall goal\n{plan.summary}",
@@ -71,9 +73,11 @@ class Coder:
         ]
         if task.target_files:
             sections.append("## Files likely involved\n" + "\n".join(task.target_files))
+        if context:
+            sections.append(context)
         sections.append(f"## Repository overview\n{repo_summary}")
         if feedback:
             sections.append(
                 "## Reviewer feedback on your previous attempt (fix these issues)\n" + feedback
             )
-        return self._agent.run(CODER_SYSTEM, "\n\n".join(sections))
+        return self._agent.run(CODER_SYSTEM, "\n\n".join(sections), temperature=temperature)

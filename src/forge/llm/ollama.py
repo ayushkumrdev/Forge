@@ -41,6 +41,7 @@ class OllamaClient(LLMClient):
         tools: list[ToolSpec] | None = None,
         temperature: float | None = None,
         on_token: TokenCallback | None = None,
+        format: dict[str, Any] | None = None,
     ) -> LLMResponse:
         payload: dict[str, Any] = {
             "model": self.model,
@@ -53,6 +54,10 @@ class OllamaClient(LLMClient):
         }
         if tools:
             payload["tools"] = [t.to_wire() for t in tools]
+        if format is not None:
+            # Ollama structured outputs: the reply is grammar-constrained to
+            # this JSON schema — malformed output becomes impossible.
+            payload["format"] = format
 
         try:
             if on_token is not None:

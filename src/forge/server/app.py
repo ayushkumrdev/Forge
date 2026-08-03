@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from forge import __version__
 from forge.config import ForgeSettings
-from forge.llm.ollama import OllamaClient
+from forge.llm.factory import make_client
 from forge.memory.store import MemoryStore
 from forge.repo.scanner import RepoScanner
 from forge.server.chat_api import ChatLLMFactory, ChatManager, build_chat_router
@@ -38,23 +38,11 @@ def create_app(
     if app_state_path is None:
         app_state_path = Path.home() / ".forge" / "app_state.json"
 
-    def default_llm() -> OllamaClient:
-        return OllamaClient(
-            host=settings.ollama_host,
-            model=settings.model,
-            temperature=settings.temperature,
-            num_ctx=settings.num_ctx,
-            timeout_s=settings.request_timeout_s,
-        )
+    def default_llm():
+        return make_client(settings)
 
-    def default_chat_llm(model: str | None) -> OllamaClient:
-        return OllamaClient(
-            host=settings.ollama_host,
-            model=model or settings.model,
-            temperature=settings.temperature,
-            num_ctx=settings.num_ctx,
-            timeout_s=settings.request_timeout_s,
-        )
+    def default_chat_llm(model: str | None):
+        return make_client(settings, model)
 
     manager = RunManager(workspace, settings, llm_factory or default_llm)
     chat_manager = ChatManager(
@@ -69,10 +57,10 @@ def create_app(
 
     @app.get("/api/health")
     def health() -> dict:
-        client = OllamaClient(host=settings.ollama_host, model=settings.model)
-        ollama_ok = client.ping()
+        client = make_client(settings)
+        backend_ok = client.ping()
         model_ok = False
-        if ollama_ok:
+        if backend_ok:
             try:
                 models = client.list_models()
                 model_ok = settings.model in models
@@ -82,16 +70,17 @@ def create_app(
             "version": __version__,
             "workspace": str(workspace),
             "model": settings.model,
-            "ollama_reachable": ollama_ok,
+            "provider": settings.provider,
+            "ollama_reachable": backend_ok,  # legacy key the dashboard reads
             "model_available": model_ok,
         }
 
     @app.get("/api/models")
     def models() -> list[str]:
-        """Installed Ollama models — the app's model-switcher dropdown."""
+        """Installed models — the app's model-switcher dropdown."""
         try:
-            return OllamaClient(host=settings.ollama_host).list_models()
-        except Exception:  # noqa: BLE001 — no Ollama, empty dropdown
+            return make_client(settings).list_models()
+        except Exception:  # noqa: BLE001 — no backend, empty dropdown
             return []
 
     # -- repository -------------------------------------------------------------

@@ -1,10 +1,11 @@
 # Forge
 
 **Forge is a local autonomous AI software engineer** — a Claude Code-style agent that runs
-entirely on your machine, powered by [Ollama](https://ollama.com) and `qwen2.5-coder:7b`.
-Point it at a repository, give it a task in plain English, and it plans the work, edits
-files through safe tools, runs your checks, reviews its own diff, and iterates until the
-change passes review.
+entirely on your machine, powered by [Ollama](https://ollama.com) and `qwen2.5-coder:7b`
+by default, or any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, OpenRouter, …)
+via `FORGE_PROVIDER=openai`. Point it at a repository, give it a task in plain English,
+and it plans the work, edits files through safe tools, runs your checks, reviews its own
+diff, and iterates until the change passes review.
 
 ```
 forge app                                # desktop app: chat window + folder picker
@@ -60,12 +61,35 @@ desktop). Pick a project folder to give Forge access, then just talk:
   mistakes aren't repeated.
 - **Coder** works like Claude Code: it calls tools in a loop — `read_file`,
   `edit_file`, `write_file`, `delete_file`, `grep`, `find_files`, `list_dir`,
-  `run_command`, `git`, plus code intelligence (`find_symbol`, `who_imports`),
+  `run_command`, `run_powershell` (Windows), `git`, plus code intelligence
+  (`find_symbol`, `who_imports`),
   hybrid retrieval (`search_code`), and web docs (`fetch_url`) — reading code
   before changing it and making minimal targeted edits.
 - **Reviewer** is independent from the coder. It judges the *actual unified diff* and
   the results of your `--check` commands, then approves or returns concrete issues
   that are fed back to the coder for another attempt (up to `FORGE_MAX_REVIEW_CYCLES`).
+
+## Grounding — hallucination attacked structurally
+
+Small local models drift; Forge corrects them with reality, not prompting:
+
+- **Syntax gate** — every write/edit is parsed *before* it touches disk (Python
+  ast, JSON, TOML, tree-sitter for JS/TS/Go/Rust/Java and more). A change that
+  would introduce a syntax error is refused with the parser's diagnosis; files
+  that were already broken are never blocked. The repo can't silently rot.
+- **Self-repairing edits** — near-miss `old_string`s are matched
+  whitespace/CRLF-tolerantly against the file's real bytes, or answered with
+  the closest actual snippet to copy. No retry death-spirals.
+- **Grammar-constrained recovery** — a mangled tool call triggers one re-ask
+  constrained to the tool-call JSON schema (structured outputs), so malformed
+  calls are grammatically impossible.
+- **Retrieval pre-flight** — the code most relevant to the task is auto-injected
+  before the model generates, so it works from your real APIs, not remembered
+  ones.
+- **Act-don't-tell enforcement** — when you ask for a change, a reply that
+  pastes code into chat (or promises "I will now edit…") while no file was
+  touched is bounced back until the model actually does the work; claiming
+  "tests passed" without having run a command is bounced the same way.
 
 ## Repository intelligence & retrieval
 
@@ -92,6 +116,8 @@ The same REST API (`/api/runs`, `/api/repo`, `/api/memory`, `/api/health`, docs 
 
 - Destructive commands (`rm -rf /`, `git push --force`, `format`, `dd`, …) are blocked
   by a safety guard that every tool call passes through.
+- Writes/edits that would introduce a syntax error are refused before touching
+  disk (the syntax gate above), so a bad model step can't break a working file.
 - File access is confined to the target repository; `.git/` internals are write-protected.
 - **Every file Forge modifies is backed up first** to `.forge/backups/<run-id>/`.
 - Edits require an exact unique text match, so files are never overwritten blindly.
@@ -122,12 +148,16 @@ Everything is overridable via environment variables (or a `.env` file):
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `FORGE_PROVIDER` | `ollama` | `ollama` or `openai` (any OpenAI-compatible server) |
 | `FORGE_OLLAMA_HOST` | `http://localhost:11434` | Ollama endpoint |
+| `FORGE_OPENAI_BASE_URL` | `http://localhost:1234/v1` | OpenAI-compatible endpoint (LM Studio default) |
+| `FORGE_OPENAI_API_KEY` | (empty) | Bearer token, if the server needs one |
 | `FORGE_MODEL` | `qwen2.5-coder:7b` | Chat model (needs tool-calling support) |
 | `FORGE_NUM_CTX` | `16384` | Context window tokens |
 | `FORGE_MAX_AGENT_STEPS` | `25` | Coder tool-loop budget per attempt |
 | `FORGE_MAX_REVIEW_CYCLES` | `3` | Code→review iterations per task |
 | `FORGE_COMMAND_TIMEOUT_S` | `300` | Timeout for each shell command |
+| `FORGE_SYNTAX_GATE` | `1` | Parse-verify every write/edit before it lands |
 
 ## Project layout
 

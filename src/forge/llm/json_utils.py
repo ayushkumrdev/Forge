@@ -61,6 +61,33 @@ def extract_tool_call(text: str) -> ToolCall | None:
     return None
 
 
+def looks_like_tool_call(text: str, known_tools: list[str]) -> bool:
+    """Heuristic for a MANGLED tool call: the model clearly tried to invoke a
+    tool (a known tool name plus call-shaped JSON) but extract_tool_call could
+    not parse it. Plain answers that merely mention a tool never match."""
+    stripped = text.strip()
+    if not stripped or "{" not in stripped:
+        return False
+    if "<tool_call>" in stripped:
+        return True
+    if not any(name in stripped for name in known_tools):
+        return False
+    return stripped.startswith("{") or '"name"' in stripped or "'name'" in stripped
+
+
+def tool_call_schema(known_tools: list[str]) -> dict[str, Any]:
+    """JSON schema for one tool invocation — used as a decoding grammar so the
+    model cannot emit a malformed call."""
+    return {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "enum": list(known_tools)},
+            "arguments": {"type": "object"},
+        },
+        "required": ["name", "arguments"],
+    }
+
+
 def _first_balanced(text: str) -> str | None:
     for opener, closer in (("{", "}"), ("[", "]")):
         start = text.find(opener)

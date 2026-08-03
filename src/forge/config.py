@@ -9,8 +9,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class ForgeSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="FORGE_", env_file=".env", extra="ignore")
 
-    # LLM backend
+    # LLM backend — provider "ollama" (default) or "openai" (any
+    # OpenAI-compatible server: LM Studio, llama.cpp, vLLM, OpenRouter, ...)
+    provider: str = "ollama"
     ollama_host: str = "http://localhost:11434"
+    openai_base_url: str = "http://localhost:1234/v1"
+    openai_api_key: str = ""
     model: str = "qwen2.5-coder:7b"
     temperature: float = 0.2
     num_ctx: int = 16384
@@ -24,6 +28,9 @@ class ForgeSettings(BaseSettings):
     # Tool behaviour
     command_timeout_s: float = 300.0
     max_tool_output_chars: int = 8_000
+    # Parse-verify every write/edit; changes that introduce a syntax error are
+    # refused before touching disk (FORGE_SYNTAX_GATE=0 to disable)
+    syntax_gate: bool = True
 
     # Repository scanning
     max_tree_entries: int = 400

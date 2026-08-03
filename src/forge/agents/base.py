@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from forge.llm.base import ChatMessage, LLMClient, Usage
-from forge.llm.json_utils import extract_tool_call
+from forge.llm.base import ChatMessage, LLMClient, ToolSpec, Usage
+from forge.llm.json_utils import extract_tool_call, looks_like_tool_call, tool_call_schema
 from forge.telemetry import Recorder
 from forge.tools.base import ToolRegistry
 
@@ -34,6 +34,29 @@ def recover_inline_tool_call(message: ChatMessage, known_tools: list[str]) -> Ch
     return message.model_copy(update={"tool_calls": [call], "content": ""})
 
 
+def constrained_tool_retry(
+    llm: LLMClient,
+    messages: list[ChatMessage],
+    specs: list[ToolSpec],
+    known_tools: list[str],
+) -> tuple[ChatMessage, Usage] | None:
+    """Grammar-constrained recovery: when a reply looks like a mangled tool
+    call, re-ask with the response constrained to the tool-call JSON schema
+    (Ollama structured outputs) — the model cannot emit malformed JSON under
+    the grammar. Returns None when the retry did not yield a usable call."""
+    try:
+        response = llm.chat(messages, tools=specs, format=tool_call_schema(known_tools))
+    except Exception:  # noqa: BLE001 — recovery must never break the main loop
+        return None
+    message = response.message
+    if not message.tool_calls:
+        call = extract_tool_call(message.content or "")
+        if call is None or call.name not in known_tools:
+            return None
+        message = message.model_copy(update={"tool_calls": [call], "content": ""})
+    return message, response.usage
+
+
 class ToolLoopAgent:
     def __init__(
         self,
@@ -51,7 +74,9 @@ class ToolLoopAgent:
         self._max_steps = max_steps
         self._max_tool_output_chars = max_tool_output_chars
 
-    def run(self, system_prompt: str, user_message: str) -> AgentOutcome:
+    def run(
+        self, system_prompt: str, user_message: str, temperature: float | None = None
+    ) -> AgentOutcome:
         messages = [
             ChatMessage(role="system", content=system_prompt),
             ChatMessage(role="user", content=user_message),
@@ -60,9 +85,25 @@ class ToolLoopAgent:
         specs = self._registry.specs()
 
         for step in range(1, self._max_steps + 1):
-            response = self._llm.chat(messages, tools=specs)
+            response = self._llm.chat(messages, tools=specs, temperature=temperature)
             total_usage.add(response.usage)
             message = self._recover_inline_tool_call(response.message)
+            if (
+                not message.tool_calls
+                and message.content
+                and looks_like_tool_call(message.content, self._registry.names())
+            ):
+                retried = constrained_tool_retry(
+                    self._llm, messages, specs, self._registry.names()
+                )
+                if retried is not None:
+                    message, retry_usage = retried
+                    total_usage.add(retry_usage)
+                    self._recorder.event(
+                        self.name,
+                        "constrained_tool_retry",
+                        tool=message.tool_calls[0].name,
+                    )
             self._recorder.event(
                 self.name,
                 "llm_response",

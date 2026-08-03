@@ -95,6 +95,20 @@ def test_streaming_assembles_content_and_calls_on_token():
     assert response.usage.duration_ms == 2000
 
 
+def test_format_schema_sent_for_constrained_decoding():
+    captured = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200, json={"message": {"role": "assistant", "content": '{"name": "read_file"}'}}
+        )
+
+    schema = {"type": "object", "properties": {"name": {"type": "string"}}}
+    _client_with(handler).chat([ChatMessage(role="user", content="go")], format=schema)
+    assert captured["format"] == schema
+
+
 def test_connect_error_raises_friendly_llmerror():
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused")

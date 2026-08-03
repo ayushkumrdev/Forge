@@ -221,7 +221,7 @@ def test_undo_restores_files(workspace):
                     ),
                     ToolCall(
                         name="write_file",
-                        arguments={"path": "new.py", "content": "brand new"},
+                        arguments={"path": "new.py", "content": "brand = 'new'"},
                     ),
                 ],
             ),
@@ -236,6 +236,30 @@ def test_undo_restores_files(workspace):
     assert set(restored) == {"keep.py", "new.py"}
     assert (workspace / "keep.py").read_text(encoding="utf-8") == "original\n"
     assert not (workspace / "new.py").exists()
+
+
+def test_token_pressure_triggers_compaction(workspace):
+    """Long tool outputs must trigger compaction well before the message-count
+    threshold — the estimated token footprint is the real constraint."""
+    from forge.config import ForgeSettings
+
+    llm = MockLLMClient(
+        [
+            ChatMessage(role="assistant", content="summary of the earlier work"),
+            ChatMessage(role="assistant", content="continuing"),
+        ]
+    )
+    settings = ForgeSettings(num_ctx=400, chat_compact_threshold=30)
+    session = ChatSession(workspace, llm, settings=settings, session_id="tok-test")
+    # 10 messages (< threshold) but each huge relative to num_ctx=400
+    for i in range(10):
+        session.history.append(ChatMessage(role="user", content=f"m{i} " + "x" * 500))
+
+    session.send("continue")
+    assert any(
+        m.role == "system" and "compacted" in m.content for m in session.history
+    )
+    assert session.history[-1].content == "continuing"
 
 
 # -- slash commands ---------------------------------------------------------------

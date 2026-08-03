@@ -10,6 +10,7 @@ from forge.safety.guard import SafetyGuard
 from forge.tools.base import Tool, ToolResult
 from forge.tools.changes import ChangeLedger
 from forge.tools.edit_repair import MatchOutcome, compute_edit
+from forge.tools.syntax_check import gate_edit
 
 
 class ReadFileTool(Tool):
@@ -71,12 +72,29 @@ class WriteFileTool(Tool):
         "required": ["path", "content"],
     }
 
-    def __init__(self, guard: SafetyGuard, ledger: ChangeLedger) -> None:
+    def __init__(
+        self, guard: SafetyGuard, ledger: ChangeLedger, syntax_gate: bool = True
+    ) -> None:
         self._guard = guard
         self._ledger = ledger
+        self._syntax_gate = syntax_gate
 
     def run(self, path: str, content: str) -> ToolResult:
         resolved = self._guard.check_write_path(path)
+        if self._syntax_gate:
+            original = (
+                resolved.read_text(encoding="utf-8-sig", errors="replace")
+                if resolved.is_file()
+                else None
+            )
+            gate = gate_edit(resolved.name, original, content)
+            if gate:
+                return ToolResult(
+                    ok=False,
+                    error=f"Rejected — this content has a syntax error ({gate}). "
+                    f"Nothing was written to {path}. Fix the syntax and call "
+                    "write_file again with the corrected complete content.",
+                )
         self._ledger.record_before_write(resolved)
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(content, encoding="utf-8")
@@ -103,9 +121,12 @@ class EditFileTool(Tool):
         "required": ["path", "old_string", "new_string"],
     }
 
-    def __init__(self, guard: SafetyGuard, ledger: ChangeLedger) -> None:
+    def __init__(
+        self, guard: SafetyGuard, ledger: ChangeLedger, syntax_gate: bool = True
+    ) -> None:
         self._guard = guard
         self._ledger = ledger
+        self._syntax_gate = syntax_gate
 
     def run(self, path: str, old_string: str, new_string: str) -> ToolResult:
         resolved = self._guard.check_write_path(path)
@@ -125,6 +146,15 @@ class EditFileTool(Tool):
         result = compute_edit(content, old_string, new_string)
 
         if result.outcome == MatchOutcome.APPLIED:
+            if self._syntax_gate:
+                gate = gate_edit(resolved.name, content, result.new_content)
+                if gate:
+                    return ToolResult(
+                        ok=False,
+                        error=f"Rejected — this edit would introduce a syntax error "
+                        f"({gate}). The file was NOT modified. Fix new_string and "
+                        "call edit_file again.",
+                    )
             self._ledger.record_before_write(resolved)
             resolved.write_text(result.new_content, encoding="utf-8")
             note = (

@@ -73,4 +73,8 @@ class LLMClient(ABC):
         tools: list[ToolSpec] | None = None,
         temperature: float | None = None,
         on_token: TokenCallback | None = None,
-    ) -> LLMResponse: ...
+        format: dict[str, Any] | None = None,
+    ) -> LLMResponse:
+        """`format` is an optional JSON schema the reply must conform to
+        (grammar-constrained decoding). Backends that cannot enforce it should
+        ignore it rather than fail."""
