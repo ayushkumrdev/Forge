@@ -42,7 +42,7 @@ behind an existing interface.
 - Self-contained dark web dashboard: live run feed, diff viewer, repo and
   memory views; `forge serve`
 
-## ✅ Milestone 6 — Interactive chat (the Claude Code experience)
+## ✅ Milestone 6 — Interactive chat
 - `forge chat`: persistent multi-turn tool-loop session on the repository
 - Permission system: ask-before-write/command by default, `--auto` to skip;
   read-only tools never prompt; per-session "always allow"
@@ -63,7 +63,7 @@ behind an existing interface.
 - Stop button (soft cancel between steps) and message queueing while busy
 - Multiple conversations with a sidebar, titles, and instant switching
 - Recent-folders memory on the welcome screen; session re-attach on reload
-- Claude-grade UI: forge-themed dark design, expandable tool cards with
+- Refined UI: forge-themed dark design, expandable tool cards with
   arguments/results, code blocks with copy + syntax highlighting, live
   elapsed-time working indicator, token usage footer
 
@@ -150,7 +150,7 @@ changing files) with enforcement, not hope:
   prompt teaches the analyze → clone into workspace → edit-locally workflow.
   Live-verified against the real GitHub API.
 - **UI redesign** (`server/static/app.html`): the desktop app moved from
-  neon-ember hacker styling to a professional, Claude-grade design system —
+  neon-ember hacker styling to a professional design system —
   warm charcoal palette (#262624 / #1f1e1b), terracotta accent (#d97757),
   Charter serif brand ("✳ Forge"), flat surfaces with 1px borders (no
   gradients/glows/grain), circular send button, refined tool cards, code
@@ -191,8 +191,8 @@ changing files) with enforcement, not hope:
   genius = intent brief (self-brief without a thinker), one completeness
   check pass that re-reads the request before the final answer, 1.5× steps.
 
-## ✅ Milestone 16 — Claude-style composer + real conversations
-- **Composer controls** (like Claude's chat box): ＋ image attach, Ask
+## ✅ Milestone 16 — Composer redesign + real conversations
+- **Composer controls**, all inside the input box: ＋ image attach, Ask
   first/Auto pill, Fast·Smart·Genius selector, Stop and ↑ send — all inside
   the input box; top bar reduced to folder, model, Diff, Undo all; welcome
   screen simplified to just folder + model.

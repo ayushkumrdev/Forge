@@ -1,4 +1,4 @@
-"""Project instructions, Claude Code's CLAUDE.md equivalent: a FORGE.md (or
+"""Project instructions: a FORGE.md (or
 CLAUDE.md) at the repository root is loaded into every agent's system prompt."""
 
 from __future__ import annotations

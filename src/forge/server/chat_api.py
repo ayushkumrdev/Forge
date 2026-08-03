@@ -1,6 +1,6 @@
 """Chat API for the desktop app: multiple conversations, background turn
 execution with token streaming, message queueing, soft cancel, and blocking
-permission approvals — the GUI equivalent of Claude Code's 'Allow?' prompt."""
+permission approvals shown as an in-app dialog."""
 
 from __future__ import annotations
 

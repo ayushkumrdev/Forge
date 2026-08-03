@@ -1,6 +1,6 @@
 # Forge
 
-**Forge is a local autonomous AI software engineer** — a Claude Code-style agent that runs
+**Forge is a local autonomous AI software engineer** — an agent that runs
 entirely on your machine, powered by [Ollama](https://ollama.com) and `qwen2.5-coder:7b`
 by default, or any OpenAI-compatible server (LM Studio, llama.cpp, vLLM, OpenRouter, …)
 via `FORGE_PROVIDER=openai`. Point it at a repository, give it a task in plain English,
@@ -18,8 +18,8 @@ forge run "add input validation to the signup endpoint" --repo path/to/project -
 `forge app` opens Forge as a native window (`forge shortcut` puts it on your
 desktop). Pick a project folder to give Forge access, then just talk:
 
-- Chat like you would with Claude — Forge reads, searches, edits and builds in
-  the selected folder, showing every tool action live in the thread.
+- Just talk — Forge reads, searches, edits and builds in the selected
+  folder, showing every tool action live in the thread.
 - **Everything in the chat box**: ＋ to attach images (described by the vision
   model), Ask first/Auto permission pill, Fast·Smart·Genius effort selector.
 - **Conversations persist**: past chats appear in the sidebar across launches,
@@ -32,7 +32,7 @@ desktop). Pick a project folder to give Forge access, then just talk:
 - Change folders anytime; each folder keeps its own memory and history under
   `.forge/`. Everything runs 100% locally.
 
-## Chat mode — the Claude Code experience
+## Chat mode
 
 `forge chat` opens an interactive session on your repository:
 
@@ -63,7 +63,7 @@ desktop). Pick a project folder to give Forge access, then just talk:
   multi-language symbols) into a small ordered task list — informed by **execution
   memory**: lessons from similar past runs are recalled and injected so known
   mistakes aren't repeated.
-- **Coder** works like Claude Code: it calls tools in a loop — `read_file`,
+- **Coder** calls tools in a loop — `read_file`,
   `edit_file`, `write_file`, `delete_file`, `grep`, `find_files`, `list_dir`,
   `run_command`, `run_powershell` (Windows), `git`, plus code intelligence
   (`find_symbol`, `who_imports`),

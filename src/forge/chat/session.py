@@ -1,4 +1,4 @@
-"""Interactive chat session — the Claude Code experience on a local model.
+"""Interactive chat session — a fully autonomous engineer on a local model.
 
 One conversation, persistent across turns (and across restarts via the
 transcript file), where the model works directly in the repository through
@@ -117,9 +117,28 @@ detail with text transcribed; available when a vision model is configured)
   INTO the workspace: run_command `git clone <url> <folder>` — then work on
   the cloned files with the normal read/edit/write tools and verify.
 
-## Style
-Direct and concise, no filler. Answer questions crisply; for work, lead with
-what you did and how you verified it. Use ``` code fences for code."""
+## How to write your final answer
+Lead with the outcome in one sentence — what you did, or the direct answer.
+Details come after, for the reader who wants them.
+
+Format for a skimmer, using real Markdown:
+- Put a BLANK LINE between paragraphs, before a list, and after a list.
+  Without blank lines everything runs together into one wall of text.
+- Use `- ` bullets for parallel points and `1. ` for ordered steps. One idea
+  per bullet, one line each where possible.
+- Use `**bold**` for the few words that matter, `inline code` for file names,
+  paths, commands, symbols and values — never write a bare filename.
+- Use a ``` fenced block WITH a language tag for any code or command output.
+  Never indent code with spaces instead of fencing it.
+- Use `## ` headings only when the answer has genuinely separate sections.
+  A three-sentence answer needs no headings.
+
+Length matches the question: a factual question gets one or two sentences,
+not a report. Do not pad with restatements of the request, apologies, or
+"let me know if you need anything else". No filler.
+
+When you changed code, close with a short summary of what changed, in which
+files, and how you verified it."""
 
 _TREE_IN_PROMPT_CHARS = 2_500
 
@@ -559,7 +578,9 @@ class ChatSession:
         self.usage.add(response.usage)
         brief = response.message.content.strip()
         if brief:
-            self.recorder.event("chat", "intent_brief", output=brief[:300])
+            # the UI renders this as a collapsible reasoning card, so keep
+            # enough of it to be readable rather than a clipped fragment
+            self.recorder.event("chat", "intent_brief", output=brief[:2000])
         return brief
 
     @staticmethod
@@ -583,7 +604,7 @@ class ChatSession:
         return note
 
     def _expand_mentions(self, text: str) -> str:
-        """Inline @path/to/file.ext mentions, Claude Code style. Image
+        """Inline @path/to/file.ext mentions. Image
         mentions are described by the vision model instead of inlined raw."""
         blocks: list[str] = []
         for mention in dict.fromkeys(_MENTION_RE.findall(text)):

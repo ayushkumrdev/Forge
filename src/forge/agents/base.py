@@ -1,7 +1,7 @@
 """The agentic tool loop: send messages + tool specs to the model, execute the
 tool calls it returns, feed results back, repeat until the model answers in
 plain text or the step budget runs out. This is the same core loop that
-Claude Code-style agents are built on."""
+modern tool-using coding agents are built on."""
 
 from __future__ import annotations
 

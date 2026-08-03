@@ -263,7 +263,7 @@ def chat(
     ),
     resume: bool = typer.Option(False, "--resume", help="Resume the previous chat session."),
 ) -> None:
-    """Interactive session — work with Forge like Claude Code, on your repo."""
+    """Interactive session — talk to Forge and it works in your repository."""
     from rich.markdown import Markdown
     from rich.prompt import Confirm
 

@@ -1,4 +1,4 @@
-"""Slash commands for the chat REPL, Claude Code style. Pure logic — the CLI
+"""Slash commands for the chat REPL. Pure logic — the CLI
 layer only prints what comes back, so every command is unit-testable."""
 
 from __future__ import annotations
@@ -106,7 +106,7 @@ def _run_autonomous(session: ChatSession, request: str) -> str:
 
 
 def _generate_instructions(session: ChatSession) -> str:
-    """Create FORGE.md (like Claude Code's /init creating CLAUDE.md)."""
+    """Create FORGE.md: the project's standing instructions for Forge."""
     target = session.workspace / "FORGE.md"
     if target.exists():
         return "FORGE.md already exists — edit it directly or delete it first."

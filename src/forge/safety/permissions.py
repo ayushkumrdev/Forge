@@ -1,4 +1,4 @@
-"""Permission policy, Claude Code-style: read-only tools always run; mutating
+"""Permission policy: read-only tools always run; mutating
 tools (file writes, shell commands, git) either run automatically ('auto', the
 default for autonomous runs) or require interactive approval ('ask', the
 default for chat). Denial is not an error — the model receives it as a tool
