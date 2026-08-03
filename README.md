@@ -156,6 +156,30 @@ Point Forge at any GitHub project — no clone needed to understand it:
 - Works unauthenticated (60 req/h); set `FORGE_GITHUB_TOKEN` for 5000/h and
   private repositories.
 
+## Measuring the agent
+
+Forge ships its own benchmark. `forge eval` runs **SWE-micro** — tiered tasks
+on real fixture repositories, scored by hidden pytest suites the agent never
+sees — and reports not just whether it succeeded but *how it behaved*:
+
+```powershell
+forge eval --tier 1 --seeds 3                  # baseline
+forge eval --ablation no-gates                 # same tasks, gates disabled
+```
+
+| metric | meaning |
+| --- | --- |
+| **TSR** | hidden checks pass |
+| **ADT** act-don't-tell | change requests where it actually changed something |
+| **FVR** false-verification | claims tests ran when no command ran (lower better) |
+| **GER** grounded-edit | edits that landed on real, existing text |
+| **WCR** wasted-cycle | tool calls repeating an identical earlier call (lower better) |
+
+Every gate has a kill-switch (`FORGE_GATE_ACTION=0`, `FORGE_SYNTAX_GATE=0`, …)
+so any mechanism can be ablated and attributed. Detection keeps running while
+a gate is off, so a disabled gate still *measures* what it would have caught.
+See [docs/RESEARCH_ROADMAP.md](docs/RESEARCH_ROADMAP.md).
+
 ## Dashboard
 
 ```powershell

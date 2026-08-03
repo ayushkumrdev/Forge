@@ -9,8 +9,23 @@ from typing import Any
 from forge.safety.guard import SafetyGuard
 from forge.tools.base import Tool, ToolResult
 from forge.tools.changes import ChangeLedger
-from forge.tools.edit_repair import MatchOutcome, compute_edit
+from forge.tools.edit_repair import EditResult, MatchOutcome, compute_edit
 from forge.tools.syntax_check import gate_edit
+
+
+def _exact_only_edit(content: str, old_string: str, new_string: str) -> EditResult:
+    """Baseline matcher for ablations: byte-exact unique match or nothing —
+    the behaviour of a conventional edit tool, with no repair."""
+    occurrences = content.count(old_string)
+    if occurrences == 1:
+        return EditResult(
+            outcome=MatchOutcome.APPLIED,
+            new_content=content.replace(old_string, new_string, 1),
+            tier="exact",
+        )
+    if occurrences > 1:
+        return EditResult(outcome=MatchOutcome.AMBIGUOUS, occurrences=occurrences)
+    return EditResult(outcome=MatchOutcome.NOT_FOUND)
 
 
 class ReadFileTool(Tool):
@@ -122,11 +137,16 @@ class EditFileTool(Tool):
     }
 
     def __init__(
-        self, guard: SafetyGuard, ledger: ChangeLedger, syntax_gate: bool = True
+        self,
+        guard: SafetyGuard,
+        ledger: ChangeLedger,
+        syntax_gate: bool = True,
+        edit_repair: bool = True,
     ) -> None:
         self._guard = guard
         self._ledger = ledger
         self._syntax_gate = syntax_gate
+        self._edit_repair = edit_repair
 
     def run(self, path: str, old_string: str, new_string: str) -> ToolResult:
         resolved = self._guard.check_write_path(path)
@@ -143,7 +163,12 @@ class EditFileTool(Tool):
 
         # Self-repairing match: exact, else whitespace-tolerant, else grounded
         # correction. Kills the "old_string not found" retry death-spiral.
-        result = compute_edit(content, old_string, new_string)
+        # With repair disabled (ablation), only an exact unique match applies.
+        result = (
+            compute_edit(content, old_string, new_string)
+            if self._edit_repair
+            else _exact_only_edit(content, old_string, new_string)
+        )
 
         if result.outcome == MatchOutcome.APPLIED:
             if self._syntax_gate:
@@ -162,7 +187,9 @@ class EditFileTool(Tool):
                 if result.tier == "whitespace"
                 else ""
             )
-            return ToolResult(ok=True, output=f"Edited {path}.{note}")
+            # the tier is carried in the output so traces reveal HOW the edit
+            # landed (exact vs repaired) — the grounded-edit metric reads it
+            return ToolResult(ok=True, output=f"Edited {path} [match:{result.tier}].{note}")
 
         if result.outcome == MatchOutcome.AMBIGUOUS:
             return ToolResult(

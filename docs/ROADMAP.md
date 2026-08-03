@@ -207,13 +207,32 @@ changing files) with enforcement, not hope:
   context and corrective nudges stripped), and every row has a hover ✕
   delete that removes the session and its transcript.
 
-## Milestone 17 — Execution isolation & scale
+## ✅ Milestone 17 — Evaluation harness (research Phase 1)
+The instrument that turns "it works" into measured claims — see
+[RESEARCH_ROADMAP.md](RESEARCH_ROADMAP.md) for the full programme.
+- **SWE-micro benchmark** (`evals/suite.py`): 7 tiered tasks (T1 single-file,
+  T2 cross-file, T3 repo-level) on fixture repos, scored by hidden pytest
+  suites written only after the agent finishes and deleted afterwards.
+- **Behavioural metrics** (`evals/metrics.py`) derived from event traces:
+  ADT, FVR, GER, WCR, tool reliability. Unobserved rates report `None`, never
+  a misleading 0.
+- **Ablation infrastructure**: every gate has a kill-switch; six presets from
+  `all-gates` to `no-gates`. Detectors keep running when gates are off, so
+  ablations still measure the violations they stop preventing.
+- **`forge eval`** CLI with tiers, seeds, ablations and JSON reports.
+- Fixes the harness found on its first live run: a false-verification metric
+  that scored honest disclaimers as lies, an action detector blind to
+  inflected verbs, and an **edit death-spiral caused by over-escaped tool
+  arguments** — now repaired (`unescape_literals`), cutting that task from
+  16 tool calls to 2 and the suite from 85s to 48s.
+
+## Milestone 18 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 18 — More agents & evaluation
+## Milestone 19 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness

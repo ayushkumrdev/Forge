@@ -377,5 +377,76 @@ def history(
     console.print(table)
 
 
+@app.command(name="eval")
+def evaluate(
+    tier: Optional[int] = typer.Option(None, help="Only run tier 1, 2 or 3."),
+    task: Optional[str] = typer.Option(None, help="Comma-separated task ids."),
+    model: Optional[str] = typer.Option(None, help="Model under test."),
+    effort: str = typer.Option("smart", help="fast | smart | genius."),
+    ablation: str = typer.Option("all-gates", help="Gate configuration to test."),
+    seeds: int = typer.Option(1, help="Repeats per task (run-to-run variance)."),
+    out: Optional[Path] = typer.Option(None, help="Write the JSON report here."),
+) -> None:
+    """Run the SWE-micro benchmark and report success + behavioural metrics."""
+    from forge.evals.runner import ABLATIONS, run_suite, write_report
+
+    if ablation not in ABLATIONS:
+        console.print(f"[red]Unknown ablation {ablation!r}.[/red] "
+                      f"Options: {', '.join(ABLATIONS)}")
+        raise typer.Exit(2)
+
+    settings = _settings(model)
+    settings.effort = effort
+    ids = [t.strip() for t in task.split(",")] if task else None
+
+    console.print(
+        Panel(
+            f"model [bold]{settings.model}[/bold] · effort [bold]{effort}[/bold] · "
+            f"gates [bold]{ablation}[/bold] · seeds [bold]{seeds}[/bold]",
+            title="SWE-micro",
+        )
+    )
+
+    def progress(result) -> None:
+        mark = "[green]PASS[/green]" if result.solved else "[red]FAIL[/red]"
+        console.print(
+            f"  {mark} {result.task_id} (T{result.tier}) "
+            f"{result.duration_s}s · {result.metrics.summary_line()}"
+        )
+
+    report = run_suite(
+        llm_factory=lambda: _client(settings),
+        settings=settings,
+        tier=tier,
+        ids=ids,
+        seeds=seeds,
+        ablation=ablation,
+        on_result=progress,
+    )
+
+    summary = report.summary()
+    table = Table("metric", "value")
+    table.add_row("task success rate", f"{summary['task_success_rate'] * 100:.1f}%")
+    table.add_row("solved", f"{summary['solved']}/{summary['total']}")
+    for tier_no, stats in summary["by_tier"].items():
+        table.add_row(f"  tier {tier_no}", f"{stats['solved']}/{stats['total']}")
+    for name, stats in summary["metrics"].items():
+        if name == "totals":
+            continue
+        value = stats["mean"]
+        table.add_row(
+            name.replace("_", " "),
+            "n/a" if value is None else f"{value * 100:.1f}%  (n={stats['n']})",
+        )
+    totals = summary["metrics"]["totals"]
+    table.add_row("tool calls", f"{totals['tool_calls']} ({totals['tool_failures']} failed)")
+    table.add_row("duration", f"{summary['duration_s']}s")
+    console.print(table)
+
+    destination = out or Path(".forge") / "evals" / "report.json"
+    write_report(report, destination)
+    console.print(f"[dim]report written to {destination}[/dim]")
+
+
 if __name__ == "__main__":
     app()

@@ -135,12 +135,31 @@ _SPECIAL_TOKEN_RE = re.compile(
 # into chat (or promises to do it) instead of calling tools. The gate refuses
 # to accept such a reply as final while nothing was actually changed.
 
+# Verb STEMS plus an optional inflection, so "make", "makes", "making" and
+# "changing" all arm the gate — an earlier word-list version missed every
+# inflected form and silently under-armed on requests like "make it return 0".
 _ACTION_REQUEST_RE = re.compile(
-    r"\b(add|fix|write|create|implement|refactor|change|update|remove|delete|"
-    r"rename|move|install|build|convert|replace|improve|optimi[sz]e|correct|"
-    r"patch|apply|extract|split|merge|migrate|upgrade|set up|clean up)\b",
+    r"\b(?:add|fix|writ|creat|implement|refactor|chang|updat|remov|delet|"
+    r"renam|mov|install|build|convert|replac|improv|optimi[sz]|correct|"
+    r"patch|appl|extract|split|merg|migrat|upgrad|mak|ensur|handl|support|"
+    r"guard|wire|enabl|disabl|rework|rewrit|set up|clean up)"
+    r"(?:e|es|ed|ing|s)?\b",
     re.IGNORECASE,
 )
+# A question about code is not a request to change it: "how do I add …?"
+# must not arm the gate, or explanatory answers get bounced as deflection.
+_QUESTION_RE = re.compile(
+    r"^\s*(?:how|what|what's|why|when|where|which|who|can|could|would|should|"
+    r"does|do|did|is|are|was|explain|tell me|describe)\b",
+    re.IGNORECASE,
+)
+
+
+def is_action_request(text: str) -> bool:
+    """True when the user is asking for a change rather than an explanation."""
+    if _ACTION_REQUEST_RE.search(text) is None:
+        return False
+    return not (_QUESTION_RE.match(text) and text.rstrip().endswith("?"))
 _CODE_FENCE_RE = re.compile(r"```[\w+-]*\n.+?```", re.DOTALL)
 _PROMISE_RE = re.compile(
     r"\b(?:i\s*(?:'ll|will)|let\s+me|i\s*(?:'m|am)\s+going\s+to|"
@@ -197,6 +216,25 @@ _FALSE_VERIFICATION_RE = re.compile(
     r"|\bverified\b[^.\n]{0,50}\b(?:running|tests?|command)\b",
     re.IGNORECASE,
 )
+# ...but a reply that DISCLAIMS verification ("I did not run the tests",
+# "please run the tests yourself") is honest, and must never be scored as a
+# false claim — the disclaimer is precisely the behaviour the gate wants.
+_DISCLAIMER_RE = re.compile(
+    r"\b(?:not|n't|never|unable|cannot|can't|please|recommend|suggest|should|"
+    r"you\s+(?:can|could|may|must|need|will|might)|if\s+you|try\s+running|"
+    r"feel\s+free|make\s+sure\s+to)\b",
+    re.IGNORECASE,
+)
+
+
+def claims_verification(content: str) -> bool:
+    """True only when the reply asserts that IT verified something. Sentences
+    that deny or defer verification do not count, so an honest 'I did not run
+    the tests' is never mistaken for a lie — by the gate or by the metrics."""
+    for sentence in re.split(r"(?<=[.!?\n])\s+", content):
+        if _FALSE_VERIFICATION_RE.search(sentence) and not _DISCLAIMER_RE.search(sentence):
+            return True
+    return False
 _FALSE_CLAIM_NUDGE = (
     "You claimed the tests/checks ran, but you did NOT run any command this "
     "turn. Run them NOW with run_command and report the actual output — or "
@@ -274,7 +312,12 @@ class ChatSession:
         tools = [
             ReadFileTool(self._guard),
             WriteFileTool(self._guard, self.ledger, self.settings.syntax_gate),
-            EditFileTool(self._guard, self.ledger, self.settings.syntax_gate),
+            EditFileTool(
+                self._guard,
+                self.ledger,
+                self.settings.syntax_gate,
+                self.settings.gate_edit_repair,
+            ),
             DeleteFileTool(self._guard, self.ledger),
             ListDirTool(self._guard),
             RunCommandTool(self._guard, self.workspace, self.settings.command_timeout_s),
@@ -306,7 +349,11 @@ class ChatSession:
     def send(self, user_text: str) -> str:
         """One user turn: run the tool loop until the model answers in text."""
         expanded = self._expand_mentions(user_text)
-        if expanded == user_text and self.effort != "fast":
+        if (
+            expanded == user_text
+            and self.effort != "fast"
+            and self.settings.gate_preflight
+        ):
             # no @file context supplied -> pre-flight retrieval puts the real
             # relevant code in front of the model before it generates
             context = self._engine.preflight(user_text)
@@ -322,12 +369,16 @@ class ChatSession:
         self._maybe_compact()
 
         # arm the act-don't-tell gate when this turn asks for a change
-        action_turn = _ACTION_REQUEST_RE.search(user_text) is not None
+        action_turn = is_action_request(user_text)
         turn_mutated = False
         turn_ran_command = False
         corrections = 0
         nudged = False
         genius_checked = False
+        # the evaluation harness reconstructs per-turn behaviour from the trace
+        self.recorder.event(
+            "chat", "turn_started", action_turn=action_turn, effort=self.effort
+        )
         for _step in range(self._step_budget()):
             if self._cancelled():
                 return self._finish_stopped()
@@ -345,6 +396,7 @@ class ChatSession:
             if (
                 not message.tool_calls
                 and message.content
+                and self.settings.gate_constrained_retry
                 and looks_like_tool_call(message.content, self.registry.names())
             ):
                 retried = constrained_tool_retry(
@@ -373,17 +425,37 @@ class ChatSession:
                         )
                     )
                     continue
-                correction = None
-                if action_turn and corrections < _MAX_ACTION_NUDGES:
-                    if not turn_mutated:
-                        correction = self._deflection(content)
-                    if (
-                        correction is None
-                        and not turn_ran_command
-                        and _FALSE_VERIFICATION_RE.search(content)
-                    ):
-                        correction = _FALSE_CLAIM_NUDGE
-                if correction:
+                # Detection always runs — even with a gate disabled — so an
+                # ablation run still measures the violation it would have
+                # caught. Only the CORRECTION is gated.
+                violation, correction = None, None
+                if action_turn:
+                    if not turn_mutated and self._deflection(content):
+                        violation = (
+                            "pasted_code"
+                            if _CODE_FENCE_RE.search(content)
+                            else "promised_action"
+                        )
+                        correction = (
+                            self._deflection(content)
+                            if self.settings.gate_action
+                            else None
+                        )
+                    elif not turn_ran_command and claims_verification(content):
+                        violation = "false_verification"
+                        correction = (
+                            _FALSE_CLAIM_NUDGE
+                            if self.settings.gate_false_verification
+                            else None
+                        )
+                if violation:
+                    self.recorder.event(
+                        "chat",
+                        "honesty_violation",
+                        gate=violation,
+                        corrected=bool(correction),
+                    )
+                if correction and corrections < _MAX_ACTION_NUDGES:
                     corrections += 1
                     self.recorder.event("chat", "action_gate_nudge", attempt=corrections)
                     self.history.append(message.model_copy(update={"content": content}))
@@ -398,6 +470,15 @@ class ChatSession:
                     self.history.append(ChatMessage(role="user", content=_GENIUS_CHECK))
                     continue
                 self.history.append(message.model_copy(update={"content": content}))
+                self.recorder.event(
+                    "chat",
+                    "turn_finished",
+                    action_turn=action_turn,
+                    mutated=turn_mutated,
+                    ran_command=turn_ran_command,
+                    unverified_claim=(not turn_ran_command and claims_verification(content)),
+                    deflected=bool(action_turn and not turn_mutated),
+                )
                 self.save_transcript()
                 return content
 

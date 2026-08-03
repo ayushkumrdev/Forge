@@ -129,7 +129,12 @@ class ExecutionLoop:
         tools = [
             ReadFileTool(self._guard),
             WriteFileTool(self._guard, self.ledger, self.settings.syntax_gate),
-            EditFileTool(self._guard, self.ledger, self.settings.syntax_gate),
+            EditFileTool(
+                self._guard,
+                self.ledger,
+                self.settings.syntax_gate,
+                self.settings.gate_edit_repair,
+            ),
             DeleteFileTool(self._guard, self.ledger),
             ListDirTool(self._guard),
             RunCommandTool(

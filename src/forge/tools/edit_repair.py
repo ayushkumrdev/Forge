@@ -22,6 +22,21 @@ from dataclasses import dataclass
 _FUZZY_THRESHOLD = 0.60  # below this, a "closest span" is too different to show
 _WS_RE = re.compile(r"[ \t]+")
 
+# Small models routinely over-escape when emitting JSON tool arguments: the
+# newline in a snippet arrives as the two characters \ and n, and backslashes
+# in regexes arrive doubled. The needle is then a single line that can never
+# match a multi-line span, so every tier fails and the model loops forever
+# "correcting" itself. Observed live on qwen2.5-coder:7b: 11 consecutive
+# failed edits on one file. Decoding the escapes is not guessing — the
+# repaired needle still has to match text that provably exists.
+_ESCAPE_RE = re.compile(r"\\([nrt\\])")
+_ESCAPES = {"n": "\n", "r": "\r", "t": "\t", "\\": "\\"}
+
+
+def unescape_literals(text: str) -> str:
+    """Decode literal \\n / \\t / \\r / \\\\ sequences in one pass."""
+    return _ESCAPE_RE.sub(lambda m: _ESCAPES[m.group(1)], text)
+
 
 class MatchOutcome:
     APPLIED = "applied"
@@ -86,6 +101,28 @@ def _closest_span(content: str, needle: str) -> tuple[str, float]:
 def compute_edit(content: str, old_string: str, new_string: str) -> EditResult:
     """Resolve an (old_string -> new_string) edit against `content`, repairing
     near-misses. Pure function: returns what WOULD happen, applies nothing."""
+    result = _match(content, old_string, new_string)
+    if result.outcome == MatchOutcome.APPLIED:
+        return result
+
+    # Tier 2.5 — escape repair: the model may have sent literal \n instead of
+    # newlines. Retry with the decoded needle (and decode the replacement to
+    # match), but only accept it when it lands on real text.
+    decoded_old = unescape_literals(old_string)
+    if decoded_old != old_string:
+        repaired = _match(content, decoded_old, unescape_literals(new_string))
+        if repaired.outcome == MatchOutcome.APPLIED:
+            return EditResult(
+                outcome=MatchOutcome.APPLIED,
+                new_content=repaired.new_content,
+                tier="escaped",
+            )
+        if repaired.outcome == MatchOutcome.NOT_FOUND and repaired.suggestion:
+            return repaired  # a better-grounded suggestion than the raw needle
+    return result
+
+
+def _match(content: str, old_string: str, new_string: str) -> EditResult:
     # Tier 1 — exact
     exact = content.count(old_string)
     if exact == 1:

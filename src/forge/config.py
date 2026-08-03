@@ -28,9 +28,24 @@ class ForgeSettings(BaseSettings):
     # Tool behaviour
     command_timeout_s: float = 300.0
     max_tool_output_chars: int = 8_000
-    # Parse-verify every write/edit; changes that introduce a syntax error are
-    # refused before touching disk (FORGE_SYNTAX_GATE=0 to disable)
+
+    # -- verification & honesty gates -------------------------------------------
+    # Each gate is independently switchable so the evaluation harness can run
+    # the ablation matrix (one gate off at a time) and attribute reliability
+    # to individual mechanisms. All default ON; FORGE_GATE_*=0 disables.
+    #
+    # Parse-verify every write/edit before it touches disk
     syntax_gate: bool = True
+    # Self-repairing edit matching (whitespace-tolerant + grounded correction)
+    gate_edit_repair: bool = True
+    # Bounce replies that paste code / promise action instead of acting
+    gate_action: bool = True
+    # Bounce replies claiming tests ran when no command executed
+    gate_false_verification: bool = True
+    # Auto-inject the most relevant real code before the model generates
+    gate_preflight: bool = True
+    # Re-ask malformed tool calls under a JSON schema
+    gate_constrained_retry: bool = True
 
     # Repository scanning
     max_tree_entries: int = 400
