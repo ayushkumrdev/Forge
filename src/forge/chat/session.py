@@ -39,7 +39,7 @@ from forge.tools.github import GitHubFileTool, GitHubRepoTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
-from forge.tools.web import FetchUrlTool
+from forge.tools.web import FetchUrlTool, WebSearchTool
 
 CHAT_SYSTEM = """You are Forge, an elite autonomous AI software engineer running \
 locally on the user's machine with FULL tool access to their repository. You do \
@@ -93,14 +93,16 @@ Example — read, then edit:
 - A command fails: read the error, fix the root cause, run again. Never repeat
   a failing command unchanged.
 - A tool call is denied by the user: do not retry it; ask how to proceed.
-- Unfamiliar API: grep the codebase for existing usage, or fetch_url the docs.
+- Unfamiliar API or error: grep the codebase for existing usage, or
+  web_search it and fetch_url the best result.
 
 ## Tools available
 read_file · write_file · edit_file · delete_file · list_dir · run_command ·
 run_powershell (full PowerShell on Windows: file ops, processes, env,
 package managers) · grep · find_files · search_code (by meaning) ·
 find_symbol (find definitions) · who_imports (what depends on a file) ·
-git (status/diff/log/add/commit) · fetch_url (read documentation from the web) ·
+git (status/diff/log/add/commit) · web_search (search the web) ·
+fetch_url (read a web page) ·
 github_repo (analyze any GitHub repository: metadata, README, file tree) ·
 github_file (read one file from a GitHub repository)
 
@@ -243,6 +245,7 @@ class ChatSession:
             WhoImportsTool(snapshot),
             SearchCodeTool(engine),
             FetchUrlTool(),
+            WebSearchTool(),
             GitHubRepoTool(self.settings.github_token),
             GitHubFileTool(self.settings.github_token),
         ]

@@ -63,7 +63,8 @@ desktop). Pick a project folder to give Forge access, then just talk:
   `edit_file`, `write_file`, `delete_file`, `grep`, `find_files`, `list_dir`,
   `run_command`, `run_powershell` (Windows), `git`, plus code intelligence
   (`find_symbol`, `who_imports`),
-  hybrid retrieval (`search_code`), and web docs (`fetch_url`) — reading code
+  hybrid retrieval (`search_code`), web search (`web_search`), web docs
+  (`fetch_url`), and GitHub (`github_repo`, `github_file`) — reading code
   before changing it and making minimal targeted edits.
 - **Reviewer** is independent from the coder. It judges the *actual unified diff* and
   the results of your `--check` commands, then approves or returns concrete issues

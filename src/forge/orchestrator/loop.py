@@ -43,7 +43,7 @@ from forge.tools.github import GitHubFileTool, GitHubRepoTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
-from forge.tools.web import FetchUrlTool
+from forge.tools.web import FetchUrlTool, WebSearchTool
 
 
 def ground_target_files(plan: Plan, known_files: set[str]) -> None:
@@ -139,6 +139,7 @@ class ExecutionLoop:
             GlobTool(self.workspace),
             GitTool(self.workspace),
             FetchUrlTool(),
+            WebSearchTool(),
             GitHubRepoTool(self.settings.github_token),
             GitHubFileTool(self.settings.github_token),
         ]

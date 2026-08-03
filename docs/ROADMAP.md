@@ -157,6 +157,14 @@ changing files) with enforcement, not hope:
   blocks, modals, and a calmer welcome screen. All JS behavior (streaming,
   approvals, sessions, diff viewer) unchanged; browser-verified.
 
+## ✅ Milestone 13.5 — Own identity + web search
+- **Original logo**: custom minimal anvil mark (inline SVG, terracotta) —
+  Forge's own identity across the wordmark, welcome screen, message tags,
+  and working indicator. No borrowed glyphs.
+- **web_search tool**: DuckDuckGo HTML search (no API key) returning titles,
+  decoded URLs, and snippets — pairs with fetch_url for read-the-docs flows.
+  Numeric HTML entities now decoded. Live-verified.
+
 ## Milestone 14 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`

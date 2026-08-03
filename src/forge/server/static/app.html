@@ -37,7 +37,8 @@
   }
   aside.on { display: flex; }
   .wordmark { font-family: var(--serif); font-size: 17px; font-weight: 600; letter-spacing: .2px; padding: 2px 8px 16px; color: var(--ink); }
-  .wordmark b { color: var(--accent); font-weight: 400; margin-right: 7px; }
+  .wordmark b { color: var(--accent); margin-right: 8px; }
+  .wordmark svg { width: 17px; height: 17px; vertical-align: -3px; }
   #new-chat {
     display: flex; align-items: center; gap: 8px; justify-content: center;
     background: var(--accent); color: #fff;
@@ -86,7 +87,8 @@
   .hero { width: 600px; animation: rise .45s ease both; }
   @keyframes rise { from { opacity: 0; transform: translateY(12px); } }
   .hero-mark { font-family: var(--serif); font-size: 40px; font-weight: 600; letter-spacing: -.5px; margin-bottom: 8px; }
-  .hero-mark b { color: var(--accent); font-weight: 400; margin-right: 12px; }
+  .hero-mark b { color: var(--accent); margin-right: 12px; }
+  .hero-mark svg { width: 34px; height: 34px; vertical-align: -3px; }
   .hero-sub { color: var(--dim); font-size: 15px; line-height: 1.6; margin-bottom: 32px; max-width: 480px; }
   .hero-sub em { color: var(--ink); font-style: normal; }
   .panel { background: var(--bg-deep); border: 1px solid var(--line-soft); border-radius: var(--r); padding: 26px; }
@@ -126,7 +128,7 @@
     padding: 11px 16px; max-width: 78%; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
   }
   .m-forge .tag { font-family: var(--serif); font-size: 13px; color: var(--ink); margin-bottom: 8px; }
-  .m-forge .tag::before { content: "✳ "; color: var(--accent); }
+  .m-forge .tag svg { width: 13px; height: 13px; vertical-align: -2px; margin-right: 7px; color: var(--accent); }
   .m-forge .body { line-height: 1.7; word-break: break-word; color: var(--ink); }
   .m-forge .body p { margin: 0 0 10px; }
   .m-forge.err .body { color: #e8aca5; border-left: 2px solid var(--err); padding-left: 13px; }
@@ -161,9 +163,8 @@
   /* working indicator */
   #working { display: none; align-items: center; gap: 10px; padding: 4px 0 24px; font-size: 13px; color: var(--dim); }
   #working.on { display: flex; }
-  .flame { width: 16px; height: 16px; }
-  .flame::before { content: "✳"; color: var(--accent); font-size: 15px; display: block; line-height: 1; animation: spinstar 1.6s ease-in-out infinite; }
-  @keyframes spinstar { 0%,100% { opacity: 1; transform: rotate(0deg); } 50% { opacity: .4; transform: rotate(90deg); } }
+  .flame { width: 16px; height: 16px; color: var(--accent); animation: fadepulse 1.4s ease-in-out infinite; }
+  .flame svg { width: 100%; height: 100%; display: block; }
   #queued-note { color: var(--warn); }
 
   /* ─── composer ────────────────────────────────────────── */
@@ -212,7 +213,7 @@
 <body>
 
 <aside id="sidebar">
-  <div class="wordmark"><b>✳</b>Forge</div>
+  <div class="wordmark"><b><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 6H9C6.8 6 4.9 6.9 3 7.2v2.1c1.6.3 3.2.2 4.8.2h1.7c0 2.3-1.2 4.2-3.3 4.9V16h11.6v-1.6c-2.1-.7-3.3-2.6-3.3-4.9H21V6Z"/><path d="M7 17.5h10l1.2 2.5H5.8L7 17.5Z"/></svg></b>Forge</div>
   <button id="new-chat" onclick="newChat()">New chat</button>
   <div id="convos"></div>
   <div class="side-foot">
@@ -234,7 +235,7 @@
 
   <div id="welcome">
     <div class="hero">
-      <div class="hero-mark"><b>✳</b>Forge</div>
+      <div class="hero-mark"><b><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 6H9C6.8 6 4.9 6.9 3 7.2v2.1c1.6.3 3.2.2 4.8.2h1.7c0 2.3-1.2 4.2-3.3 4.9V16h11.6v-1.6c-2.1-.7-3.3-2.6-3.3-4.9H21V6Z"/><path d="M7 17.5h10l1.2 2.5H5.8L7 17.5Z"/></svg></b>Forge</div>
       <div class="hero-sub">Your software engineer, on your machine. Forge reads, edits, runs and verifies real code in the folder you choose — <em>and nothing ever leaves this computer.</em></div>
       <div class="panel">
         <label class="lbl">Project folder</label>
@@ -290,6 +291,7 @@
 
 <script>
 "use strict";
+const LOGO = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21 6H9C6.8 6 4.9 6.9 3 7.2v2.1c1.6.3 3.2.2 4.8.2h1.7c0 2.3-1.2 4.2-3.3 4.9V16h11.6v-1.6c-2.1-.7-3.3-2.6-3.3-4.9H21V6Z"/><path d="M7 17.5h10l1.2 2.5H5.8L7 17.5Z"/></svg>';
 const $ = (s) => document.querySelector(s);
 const esc = (t) => (t ?? "").toString().replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const S = { active:false, status:"idle", msgSeen:0, evtSeen:0, timer:null, workStart:0, wMode:"ask", pollGen:0 };
@@ -457,13 +459,13 @@ function addUser(text) {
 function addForge(text, kind) {
   const cls = kind === "error" ? "err" : kind === "command" ? "cmd" : "";
   $("#lane").insertAdjacentHTML("beforeend",
-    `<div class="m m-forge ${cls}"><div class="tag">Forge</div><div class="body">${md(text)}</div></div>`);
+    `<div class="m m-forge ${cls}"><div class="tag">${LOGO}Forge</div><div class="body">${md(text)}</div></div>`);
 }
 
 const GLYPHS = {
   read_file:"◇", write_file:"✎", edit_file:"✎", delete_file:"✕", list_dir:"▤",
   run_command:"❯", run_powershell:"❯", grep:"⌕", find_files:"⌕", search_code:"◈",
-  find_symbol:"ƒ", who_imports:"⇄", git:"⎇", fetch_url:"↗",
+  find_symbol:"ƒ", who_imports:"⇄", git:"⎇", fetch_url:"↗", web_search:"⌕",
   github_repo:"⬡", github_file:"⬡",
 };
 function primaryArg(a) { return a?.path || a?.command || a?.pattern || a?.query || a?.name || a?.glob || a?.args || JSON.stringify(a || {}); }
@@ -488,7 +490,7 @@ function addToolEvents(events) {
   for (const e of events) {
     if (e.kind === "tool_call") {
       const card = document.createElement("details"); card.className = "tcard";
-      card.innerHTML = `<summary><span class="glyph">${GLYPHS[e.tool] || "⚒"}</span><span class="tname">${esc(e.tool)}</span><span class="targ">${esc(String(primaryArg(e.arguments)))}</span><span class="tstat">…</span></summary><div class="tbody"><div class="sect">arguments</div>${esc(JSON.stringify(e.arguments || {}, null, 1))}</div>`;
+      card.innerHTML = `<summary><span class="glyph">${GLYPHS[e.tool] || "◦"}</span><span class="tname">${esc(e.tool)}</span><span class="targ">${esc(String(primaryArg(e.arguments)))}</span><span class="tstat">…</span></summary><div class="tbody"><div class="sect">arguments</div>${esc(JSON.stringify(e.arguments || {}, null, 1))}</div>`;
       currentToolBox().appendChild(card);
     } else if (e.kind === "tool_result") {
       const card = lastPendingCard();
@@ -510,7 +512,7 @@ function setPartial(text) {
   if (!text) { if (live) live.remove(); return; }
   if (!live) {
     $("#lane").insertAdjacentHTML("beforeend",
-      `<div class="m m-forge" id="live-msg"><div class="tag">Forge</div><div class="body"></div></div>`);
+      `<div class="m m-forge" id="live-msg"><div class="tag">${LOGO}Forge</div><div class="body"></div></div>`);
     live = $("#live-msg");
   }
   live.querySelector(".body").innerHTML = md(text) + '<span class="cursor"></span>';
@@ -540,7 +542,7 @@ async function poll(gen, fast) {
     const w = $("#working");
     if (!w) {
       $("#lane").insertAdjacentHTML("beforeend",
-        `<div id="working"><div class="flame"></div><span id="work-label"></span><span id="queued-note"></span></div>`);
+        `<div id="working"><div class="flame">${LOGO}</div><span id="work-label"></span><span id="queued-note"></span></div>`);
     }
     $("#working").classList.toggle("on", st.status === "working");
     if (st.status === "working") {
