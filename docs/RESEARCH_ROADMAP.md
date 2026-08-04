@@ -606,7 +606,40 @@ Both were validated the way every check here now is, before being trusted:
 run over all of `src/` and `tests/`, **zero findings**, and pinned by a test
 that re-runs them over the source tree.
 
-**Running total: twenty-one defects, twenty outside the model.**
+**The confirming run then dropped to 2/6 — and was worth more than the 3/6.**
+Tier 3 rose to 2/3, but tier 2 fell to **0/3**, with tool reliability
+100%, wasted-cycle 0%, and **exactly one tool call per t2 run**. The trace
+said precisely what happened:
+
+```
+plan_first    rename push to enqueue …; rename pop to dequeue …
+focused_pass  rename push to enqueue …
+tool_call     rename_symbol
+focused_pass  rename pop to dequeue …
+turn_finished
+```
+
+Both steps ran. The second made no tool call at all, and the retry built to
+catch that never fired — because it asked *"did the file this requirement
+names change?"*, and `taskqueue.py` had changed, **in the previous step**.
+The ledger is cumulative and keyed by path, so once any step touches a file,
+every later requirement naming it looks satisfied by work it did not do. A
+set difference does not rescue this either: a second edit to the same file
+adds no new path, so same-file multi-step work — exactly the T2 shape —
+always reads as "nothing new".
+
+`_focused_pass` already returns whether *that pass* changed anything, which
+was the signal all along. **The general lesson: a per-step check must be
+computed from the step, never from cumulative state that earlier steps have
+already written into.** This is the same error as gating a multi-step
+operation per-write, in a different coordinate system, and it is the second
+time this project has paid for it.
+
+It is also the second time in this section that a metric other than TSR
+carried the diagnosis: 100% tool reliability with one call per run is not a
+clean run, it is a run that barely happened.
+
+**Running total: twenty-two defects, twenty-one outside the model.**
 
 ### 3.6 What the first numbers already tell us
 
