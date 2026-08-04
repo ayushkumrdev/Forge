@@ -751,6 +751,31 @@ into `edit_file`; and one earlier test — which asserted that a rename and
 its "update every call site" follow-up should *both* survive — was overruled
 by the evidence and rewritten.
 
+**Result: `t2-rename-in-file` 3/3 — two tool calls and ~25s on every seed.**
+One `rename_symbol` per name, no wasted calls, no repairs. A task that was
+0/3 across every earlier run in this project is now solved deterministically,
+and nothing about the model changed to do it.
+
+`t3-wire-validator` went 0/3 in the same run, and **all three failures are
+semantic**: two accepted a bad address (`DID NOT RAISE ValueError`), one
+rejected a good one. The file parses, its imports resolve, the signature is
+intact, the predicate returns a real boolean — and the logic is simply
+wrong.
+
+**This is the honest boundary of structural verification, and it is worth
+stating plainly in the paper.** Every check in this document answers "is
+this change well-formed relative to the repository?". None of them can
+answer "is this predicate correct?", because that question has no answer in
+the source — only in its behaviour. The remaining T3 failures are the first
+in this whole line of work that are not scaffold defects.
+
+Which is exactly the case for **C3, execution-guided checking**: the
+requirement already contains its own test — *"returns True only when the
+address contains exactly one '@' with non-empty text on both sides and a
+'.' after the '@'"* — and turning that into three assertions and running
+them is mechanical. That is the next build, and it is now the only thing
+standing between this tier and a score.
+
 **Running total: twenty-six defects, twenty-five outside the model.**
 
 ### 3.6 What the first numbers already tell us
