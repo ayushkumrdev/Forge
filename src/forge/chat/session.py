@@ -29,6 +29,7 @@ from forge.tools.base import ToolRegistry
 from forge.tools.changes import ChangeLedger
 from forge.tools.code_intel import FindSymbolTool, WhoImportsTool
 from forge.tools.filesystem import (
+    AppendFileTool,
     DeleteFileTool,
     EditFileTool,
     ListDirTool,
@@ -91,6 +92,7 @@ Example — read, then edit:
    list_dir). 2. READ — read_file every file you will touch; never edit
    unread files. 3. CHANGE — edit_file for surgical changes (old_string
    copied EXACTLY from the read output, with enough lines to be unique);
+   append_to_file to ADD a new function/class to an existing file;
    write_file for new files or full rewrites. 4. VERIFY — run_command the
    tests or a compile check and read the output. 5. REPORT — plain-text
    summary: what changed, which files, how you verified it.
@@ -98,6 +100,8 @@ Example — read, then edit:
 ## Recovery playbook
 - edit_file "not found": re-read the file and copy the exact text, including
   whitespace and blank lines.
+- Adding something new to a file? Use append_to_file with just the new code.
+  Never call edit_file with an empty old_string — it cannot append.
 - edit_file failed twice on one file: read it, then write_file the COMPLETE
   corrected content.
 - Your new code uses a symbol: that file must import or define it — tests too.
@@ -108,7 +112,8 @@ Example — read, then edit:
   web_search it and fetch_url the best result.
 
 ## Tools available
-read_file · write_file · edit_file · delete_file · list_dir · run_command ·
+read_file · write_file · append_to_file · edit_file · delete_file ·
+list_dir · run_command ·
 run_powershell (full PowerShell on Windows: file ops, processes, env,
 package managers) · grep · find_files · search_code (by meaning) ·
 find_symbol (find definitions) · who_imports (what depends on a file) ·
@@ -198,6 +203,15 @@ _PROMISE_RE = re.compile(
 )
 _MAX_ACTION_NUDGES = 2
 _MAX_COVERAGE_PASSES = 2
+
+# "Did it act?" means "did it change the repository". run_command is a
+# mutating tool because it needs permission to touch system state, but a turn
+# that only ran a command has not done the work — counting it as action
+# inflated ADT and stopped the act-don't-tell gate from firing on a model
+# that just re-ran the tests instead of writing code.
+_FILE_MUTATING_TOOLS = frozenset(
+    {"write_file", "edit_file", "append_to_file", "delete_file"}
+)
 
 _GENIUS_CHECK = (
     "Final completeness check: re-read the user's ORIGINAL request at the "
@@ -347,6 +361,9 @@ class ChatSession:
         tools = [
             ReadFileTool(self._guard),
             WriteFileTool(
+                self._guard, self.ledger, self.settings.syntax_gate, ladder=ladder
+            ),
+            AppendFileTool(
                 self._guard, self.ledger, self.settings.syntax_gate, ladder=ladder
             ),
             EditFileTool(
@@ -575,7 +592,7 @@ class ChatSession:
             for call in message.tool_calls:
                 self.recorder.event("chat", "tool_call", tool=call.name, arguments=call.arguments)
                 result = self.registry.execute(call.name, call.arguments)
-                if result.ok and self.registry.is_mutating(call.name):
+                if result.ok and call.name in _FILE_MUTATING_TOOLS:
                     turn_mutated = True
                 if result.ok and call.name in ("run_command", "run_powershell"):
                     turn_ran_command = True

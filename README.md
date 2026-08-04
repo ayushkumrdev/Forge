@@ -64,7 +64,8 @@ desktop). Pick a project folder to give Forge access, then just talk:
   memory**: lessons from similar past runs are recalled and injected so known
   mistakes aren't repeated.
 - **Coder** calls tools in a loop — `read_file`,
-  `edit_file`, `write_file`, `delete_file`, `grep`, `find_files`, `list_dir`,
+  `edit_file`, `write_file`, `append_to_file`, `delete_file`, `grep`,
+  `find_files`, `list_dir`,
   `run_command`, `run_powershell` (Windows), `git`, plus code intelligence
   (`find_symbol`, `who_imports`),
   hybrid retrieval (`search_code`), web search (`web_search`), web docs

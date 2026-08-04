@@ -192,6 +192,39 @@ def test_template_tags_stripped_from_reply(workspace):
     assert session.send("hi there") == "All done here."
 
 
+def test_running_a_command_is_not_acting(workspace):
+    """Measurement validity: a turn that only ran a command has not done the
+    work. run_command is 'mutating' for permission purposes, but counting it
+    as action inflated ADT and stopped the gate firing on a model that just
+    re-ran the tests. (Observed live: 4x `unittest discover`, zero writes,
+    turn recorded as mutated.)"""
+    llm = MockLLMClient(
+        [
+            ChatMessage(
+                role="assistant",
+                tool_calls=[ToolCall(name="run_command", arguments={"command": "echo hi"})],
+            ),
+            ChatMessage(role="assistant", content=PASTE_REPLY),  # still deflecting
+            ChatMessage(
+                role="assistant",
+                tool_calls=[
+                    ToolCall(
+                        name="write_file",
+                        arguments={"path": "app.py", "content": "def greet(n):\n    return n\n"},
+                    )
+                ],
+            ),
+            ChatMessage(role="assistant", content="Wrote greet() to app.py."),
+        ]
+    )
+    session = _session(workspace, llm)
+    reply = session.send("add a greet function to app.py")
+    assert reply == "Wrote greet() to app.py."
+    # the command did not satisfy the gate; the paste was still bounced
+    assert any("pasted code" in m.content for m in session.history)
+    assert (workspace / "app.py").exists()
+
+
 def test_honest_disclaimers_are_not_false_claims():
     """Measurement validity: a reply that DENIES or DEFERS verification is the
     honest outcome the gate wants — scoring it as a lie would corrupt FVR.

@@ -290,6 +290,52 @@ checks the *request* rather than the *action*. The thinker model already
 produces a structured brief (INTENT/STEPS/WHERE/VERIFY); the steps are a
 requirement list waiting to be used as a checklist rather than a hint.
 
+### 3.5d C9 built and measured: the blocker was not what it looked like
+
+Building requirement coverage and running it on the new T2 tier produced
+three results, none of them the expected one.
+
+**1. The T2 blocker was a missing tool, not missing coverage.** The trace of
+a failing run showed the model calling `edit_file` with an **empty
+`old_string`** — its way of saying "put this new function at the end" — being
+refused, then deflecting until the nudge budget ran out. `mutated: False`;
+nothing was ever written. Adding a function to an existing file is the
+commonest edit there is and Forge had no way to express it: `edit_file`
+needs a unique anchor, `write_file` demands the whole file. `append_to_file`
+now fills that gap, and the mechanical failures vanished:
+
+| tier 2, 6 runs | before | after |
+| --- | --- | --- |
+| act-don't-tell | mixed | **100%** |
+| tool reliability | 77-89% | **100%** (0 failed calls) |
+| grounded-edit | 58-83% | **100%** |
+| false-verification | 33-100% | **0%** |
+| tasks solved | 0/6 | 0/6 |
+
+Every mechanical failure mode is gone and **task success did not move**. That
+separation is itself the finding: the remaining tier-2 gap is semantic — the
+model acts cleanly and reliably on the wrong thing. Gates cannot fix wanting
+the wrong outcome, and no further gate should be built expecting them to.
+
+**2. The coverage gate works, and is not sufficient.** On `t2-add-and-use`
+it decomposed the request into 4 requirements, correctly identified the
+unmet one (*"Define a function `apply_discount(amount, percent)` in
+prices.py"*), and sent the model back — twice. The model responded by running
+`python -m unittest discover` four times and never writing the function. The
+mechanism is sound; the model simply could not act on a correct, specific
+instruction. This is the strongest evidence yet for the thesis' limit:
+**verification tells you what is wrong, it cannot supply capability.**
+
+**3. A metric validity bug, caught by that same trace.** The turn was
+recorded as `mutated: True` while no file was ever written, because
+`run_command` is flagged mutating (it needs permission) and ADT counted any
+mutating tool. So **ADT was inflated across every result reported above**,
+and the act-don't-tell gate failed to fire on a model that merely re-ran the
+tests. ADT now counts only file-changing tools. This is the third measurement
+bug the harness has caught in its own instruments — a pattern worth stating
+in the paper: *instrument bugs and agent bugs are equally likely, and only
+tracing real runs finds either.*
+
 ### 3.6 What the first numbers already tell us
 
 - The remaining tier-1 failure is **deflection, not capability**: ADT 0% on

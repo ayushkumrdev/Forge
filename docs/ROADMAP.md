@@ -243,13 +243,30 @@ The instrument that turns "it works" into measured claims — see
 - **`forge sweep`** runs the benchmark under every gate configuration and
   prints the ablation table.
 
-## Milestone 19 — Execution isolation & scale
+## ✅ Milestone 19 — Requirement coverage + the tool the benchmark demanded
+- **T2 benchmark tier**: multi-requirement work in a SINGLE file, filling the
+  gap between one edit (67% solved) and cross-file (0/6). Tiers now run
+  T1 single edit / T2 several requirements / T3 cross-file / T4 repo-level.
+- **`verify/coverage.py` (C9)**: splits a request into atomic requirements and
+  judges each against the REAL diff and the commands that ran — never the
+  model's summary. The turn cannot end while a requirement is provably absent.
+  Cheap regex pre-filter so single-outcome requests never pay for it;
+  "cannot tell" is never treated as "unmet"; bounded at 2 passes.
+- **`append_to_file`**: the missing affordance. The benchmark showed the model
+  calling edit_file with an empty old_string (meaning "append"), being
+  refused, and giving up with nothing written. Adding it took tier 2 to
+  ADT 100%, tool reliability 100%, grounded-edit 100%, FVR 0%.
+- **ADT metric fixed**: running a command counted as "acting", so the metric
+  was inflated and the act-don't-tell gate would not fire on a model that
+  merely re-ran the tests. It now counts only file-changing tools.
+
+## Milestone 20 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 20 — More agents & evaluation
+## Milestone 21 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness

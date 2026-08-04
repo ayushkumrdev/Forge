@@ -196,9 +196,10 @@ class EditFileTool(Tool):
         if not old_string:
             return ToolResult(
                 ok=False,
-                error="old_string must not be empty. Instead: call read_file on this "
-                "file, then call write_file with the COMPLETE updated file content "
-                "(existing content plus your change).",
+                error="old_string must not be empty. To ADD new code to the end "
+                "of this file, call append_to_file with just the new content — "
+                "that is almost certainly what you want here. To change text "
+                "that already exists, copy it exactly into old_string.",
             )
         if not resolved.exists():
             return ToolResult(ok=False, error=f"File not found: {path}")
@@ -257,6 +258,76 @@ class EditFileTool(Tool):
             ok=False,
             error=f"old_string not found in {path} and nothing similar is present. "
             "Call read_file to see the current content before editing.",
+        )
+
+
+class AppendFileTool(Tool):
+    """Adding a function to an existing file is the commonest edit there is,
+    and until this tool existed Forge had no way to express it: the model
+    reached for edit_file with an empty old_string (meaning "put this at the
+    end"), was refused, and deflected instead of rewriting the whole file.
+    Observed as the dominant tier-2 failure in the benchmark."""
+
+    name = "append_to_file"
+    mutating = True
+    description = (
+        "Add content to the END of an existing file — the right tool for "
+        "adding a new function, class or constant without touching what is "
+        "already there. Use edit_file to change existing text, write_file "
+        "only for a new file or a full rewrite."
+    )
+    parameters: dict[str, Any] = {
+        "type": "object",
+        "properties": {
+            "path": {"type": "string", "description": "Path relative to the repository root."},
+            "content": {"type": "string", "description": "Text to add at the end of the file."},
+        },
+        "required": ["path", "content"],
+    }
+
+    def __init__(
+        self,
+        guard: SafetyGuard,
+        ledger: ChangeLedger,
+        syntax_gate: bool = True,
+        ladder: Ladder | None = None,
+    ) -> None:
+        self._guard = guard
+        self._ledger = ledger
+        self._syntax_gate = syntax_gate
+        self._ladder = ladder
+
+    def run(self, path: str, content: str) -> ToolResult:
+        resolved = self._guard.check_write_path(path)
+        if not resolved.exists():
+            return ToolResult(
+                ok=False,
+                error=f"File not found: {path}. Use write_file to create it.",
+            )
+        if resolved.is_dir():
+            return ToolResult(ok=False, error=f"{path} is a directory.")
+        original = resolved.read_text(encoding="utf-8-sig", errors="replace")
+        # keep exactly one blank line between the old tail and the new block
+        separator = "" if original.endswith("\n\n") or not original else (
+            "\n" if original.endswith("\n") else "\n\n"
+        )
+        updated = original + separator + content.lstrip("\n")
+        if not updated.endswith("\n"):
+            updated += "\n"
+
+        refusal, advisory = _verify(
+            self._ladder, self._syntax_gate, resolved, original, updated
+        )
+        if refusal:
+            return ToolResult(
+                ok=False,
+                error=f"Rejected — {refusal} {path} was NOT modified. Fix the "
+                "content and call append_to_file again.",
+            )
+        self._ledger.record_before_write(resolved)
+        resolved.write_text(updated, encoding="utf-8")
+        return ToolResult(
+            ok=True, output=f"Appended {len(content)} chars to {path}.{advisory}"
         )
 
 

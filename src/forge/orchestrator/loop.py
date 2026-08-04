@@ -32,6 +32,7 @@ from forge.tools.base import ToolRegistry
 from forge.tools.changes import ChangeLedger
 from forge.tools.code_intel import FindSymbolTool, WhoImportsTool
 from forge.tools.filesystem import (
+    AppendFileTool,
     DeleteFileTool,
     EditFileTool,
     ListDirTool,
@@ -135,6 +136,9 @@ class ExecutionLoop:
         tools = [
             ReadFileTool(self._guard),
             WriteFileTool(
+                self._guard, self.ledger, self.settings.syntax_gate, ladder=ladder
+            ),
+            AppendFileTool(
                 self._guard, self.ledger, self.settings.syntax_gate, ladder=ladder
             ),
             EditFileTool(
