@@ -116,14 +116,37 @@ def test_tool_renames_and_reports(workspace):
     assert "def enqueue(self, item)" in (workspace / "q.py").read_text(encoding="utf-8")
 
 
-def test_tool_refuses_a_name_collision(workspace):
+def test_tool_refuses_a_real_definition_collision(workspace):
     (workspace / "q.py").write_text(QUEUE, encoding="utf-8")
     result = _session(workspace).registry.execute(
         "rename_symbol", {"path": "q.py", "old_name": "push", "new_name": "drain"}
     )
     assert not result.ok
-    assert "collide" in result.error
+    assert "already defined" in result.error
     assert "def push" in (workspace / "q.py").read_text(encoding="utf-8")  # untouched
+
+
+def test_a_dangling_reference_is_not_a_collision(workspace):
+    """The recovery path this tool exists for. Observed live: an earlier
+    edit_file had hand-renamed the CALL to self.dequeue() while `def pop`
+    remained, so the file referenced `dequeue` without defining it. The
+    collision check counted that reference and refused the rename that would
+    have repaired it."""
+    (workspace / "q.py").write_text(
+        "class Queue:\n"
+        "    def pop(self):\n"
+        "        return self._items.pop(0)\n\n"
+        "    def drain(self):\n"
+        "        return self.dequeue()\n",
+        encoding="utf-8",
+    )
+    result = _session(workspace).registry.execute(
+        "rename_symbol", {"path": "q.py", "old_name": "pop", "new_name": "dequeue"}
+    )
+    assert result.ok, result.error
+    text = (workspace / "q.py").read_text(encoding="utf-8")
+    assert "def dequeue(self):" in text
+    assert "self._items.pop(0)" in text  # the list call still untouched
 
 
 def test_tool_refuses_an_unknown_name(workspace):

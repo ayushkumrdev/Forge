@@ -92,6 +92,19 @@ def occurrences(source: str, old: str) -> list[tuple[int, int, int]]:
     return sorted(set(spots))
 
 
+def _defines(source: str, name: str) -> bool:
+    """True when `name` is bound by a definition — not merely referenced."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    return any(
+        isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        and node.name == name
+        for node in ast.walk(tree)
+    )
+
+
 def apply_rename(source: str, old: str, new: str) -> tuple[str, int]:
     """Rewrite every occurrence found in the parse tree. Returns the new
     source and how many places changed."""
@@ -265,10 +278,16 @@ class RenameSymbolTool(Tool):
                 error=f"{path} does not parse ({exc.msg} at line {exc.lineno}), so a "
                 "rename cannot be done safely. Fix the syntax first.",
             )
-        if occurrences(original, new_name):
+        # Only a DEFINITION collides. A mere reference to `new_name` is very
+        # often a half-finished rename — the model renamed a call site by
+        # hand and is now asking for the definition to follow. Refusing that
+        # blocks the exact recovery the tool exists to provide, which is what
+        # happened live: an earlier edit had produced `self.dequeue()`, so
+        # renaming `pop` to `dequeue` was rejected as a collision.
+        if _defines(original, new_name):
             return ToolResult(
                 ok=False,
-                error=f"'{new_name}' is already used in {path}; renaming "
+                error=f"'{new_name}' is already defined in {path}; renaming "
                 f"'{old_name}' to it would collide. Pick another name.",
             )
 
