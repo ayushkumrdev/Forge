@@ -502,6 +502,79 @@ tool layer.** The one genuine model limitation is narrow — coordinating two
 edits in one turn (`t2-rename-in-file`, `t3-wire-validator`, both 0/3) — and
 I would not now assert even that without tracing it again.
 
+### 3.5i Plan-first execution: the last "model limit" was a scheduling choice
+
+The claim above did not survive either. Tracing the two 0/3 tasks showed
+neither is a reasoning failure. Both need two coordinated changes, the model
+attempts both in one turn, gets the first roughly right and the second wrong,
+and every subsequent step reasons from a context stuffed with its own
+half-finished edits. The **focused pass** — one requirement, clean slate —
+already fixed exactly this, reliably. It just only ever ran as *repair, after
+the damage*.
+
+**So run it first.** `gate_plan_first` decomposes a multi-part request up
+front and executes each requirement as its own focused step, before any
+mess exists. `t2-rename-in-file` went **0/3 → 1/3**, the first time that task
+has ever scored.
+
+This is the sharpest form of the paper's thesis so far. Nothing about the
+model changed: same 7B, same weights, same prompt budget. What changed is
+**when** its attention is spent. Capability that looked like a parameter
+ceiling was a scheduling artefact.
+
+Reading the *remaining* failures gave three more mechanical defects, none of
+them semantic:
+
+1. **The focused prompt was sabotaging renames.** It ended with a fixed
+   "make the change with `append_to_file` or `edit_file`" — the last and
+   most specific instruction the model reads, so it beat the system prompt's
+   "always use `rename_symbol`" every time. Hand-editing a rename renames
+   `self._items.pop(0)` (a list method that must not change) and misses
+   `self.pop()` elsewhere: exactly the two observed failures. **Tool
+   guidance is now shaped by the requirement**, not fixed.
+2. **`narrowed_signature_errors`** (new L2 check): asked to validate the
+   address *inside* `register(name, email)`, the model shipped
+   `register(user)`. The requested change was made and every caller broke.
+   Nothing cheaper sees this — the file parses, imports resolve, the
+   signature is internally consistent. It is wrong only *relative to what was
+   there before*, which is precisely what a diff-aware check can see.
+   Narrowing only; widening with a default is never reported.
+3. **`inconsistent_boolean_return_errors`** (new L2 check):
+   `validate_email('@b.com')` returned `''`, not `False`, because `and`
+   evaluates to an operand. Fires only when the function *also* returns a
+   literal bool somewhere — the function itself declaring it deals in
+   booleans, so no judgement is involved.
+
+**And one self-inflicted regression, worth recording because it is the most
+instructive result in this section.** The new rename guidance showed the
+model a bare *arguments* object as its example. `extract_tool_call` requires
+the `name` field, so when the model copied that shape into prose — which it
+does; the example is the most concrete thing in the prompt — inline recovery
+could not parse it and the step ended having changed nothing. Measured cost:
+t2 fell from 3-4 tool calls per run to **1**, tool reliability 92% → 75%,
+with TSR unchanged at 1/6 hiding the damage.
+
+Two lessons, both generalisable:
+
+- **A prompt example is an instruction.** The model reproduces the *shape*
+  it is shown, so any example that the recovery path cannot parse is a
+  latent failure with no error message.
+- **TSR alone would have hidden this.** The task score was identical before
+  and after; only tool reliability and call count showed the regression.
+  This is the argument for the behavioural metric suite as a first-class
+  part of the harness rather than decoration.
+
+That regression also exposed a genuine gap behind it: **the main loop has had
+constrained tool retry since early on; the focused pass never did.** A
+mangled call inside a focused pass is strictly more expensive than one in the
+main loop, because the pass *is* the step — there is no next iteration to
+recover in. It now retries under the tool-call grammar too. Separately, a
+plan-first step that names a file and leaves it untouched is provably
+incomplete, and noticing costs **no model call**; those steps get one clean
+retry rather than waiting for turn-end coverage to find the gap.
+
+**Running total: nineteen defects, eighteen outside the model.**
+
 ### 3.6 What the first numbers already tell us
 
 - The remaining tier-1 failure is **deflection, not capability**: ADT 0% on

@@ -799,3 +799,27 @@ def test_the_rename_example_is_a_complete_recoverable_tool_call():
     call = extract_tool_call(payload)
     assert call is not None and call.name == "rename_symbol"
     assert call.arguments["old_name"] == "push"
+
+
+def test_plan_first_respects_the_turn_time_budget(workspace, monkeypatch):
+    """The planning phase does real model work, so it has to live inside the
+    turn's budget — it used to run before the deadline was even computed."""
+    import forge.chat.session as session_module
+
+    # first tick sets the deadline; every later one is long past it
+    ticks = iter([0.0] + [10_000.0] * 50)
+    monkeypatch.setattr(session_module.time, "monotonic", lambda: next(ticks))
+    (workspace / "a.py").write_text("x = 1\n", encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "a.py sets x to 2"},'
+            ' {"id": 2, "text": "a.py gains y"}]}'
+        )),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="pft")
+    reply = session.send("set x to 2 in a.py and add y to a.py")
+    assert "time limit" in reply
+    # the budget was already gone, so no focused step should have started
+    assert not any(
+        "Do exactly this one thing" in m.content for req in llm.requests for m in req
+    )

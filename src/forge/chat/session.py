@@ -470,6 +470,13 @@ class ChatSession:
         self.recorder.event(
             "chat", "turn_started", action_turn=action_turn, effort=self.effort
         )
+        # computed BEFORE plan-first: the planning phase does real model work
+        # and must live inside the turn's time budget like everything else
+        deadline = (
+            time.monotonic() + self.settings.max_turn_seconds
+            if self.settings.max_turn_seconds > 0
+            else None
+        )
 
         # Plan-first execution. A multi-part request attempted in one go is
         # where this model reliably comes apart: it does the first part,
@@ -493,6 +500,9 @@ class ChatSession:
                 done: list[Requirement] = []
                 for requirement in requirements:
                     if self._cancelled():
+                        break
+                    if deadline is not None and time.monotonic() > deadline:
+                        self.recorder.event("chat", "plan_first_timeout")
                         break
                     # extra compute, if the user is paying for it, goes into
                     # each step rather than into one big attempt
@@ -536,11 +546,6 @@ class ChatSession:
                         "what changed in plain text.",
                     )
                 )
-        deadline = (
-            time.monotonic() + self.settings.max_turn_seconds
-            if self.settings.max_turn_seconds > 0
-            else None
-        )
         for _step in range(self._step_budget()):
             if self._cancelled():
                 return self._finish_stopped()
