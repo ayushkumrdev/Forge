@@ -336,6 +336,49 @@ bug the harness has caught in its own instruments — a pattern worth stating
 in the paper: *instrument bugs and agent bugs are equally likely, and only
 tracing real runs finds either.*
 
+### 3.5e Bug-hunt pass: the bottleneck was Forge, not the model
+
+A systematic hunt (adversarial tool probes, end-to-end API exercise, live
+trace reading) found four defects. None was in the model.
+
+| | before | after |
+| --- | --- | --- |
+| overall TSR | 23.8% | **35.0%** |
+| T1 | 5/9 (56%) | **5/6 (83%)** |
+| T2 | 0/6 | **2/6** |
+| wasted-cycle | 12% | **2%** |
+| tool reliability | 84% | **90%** |
+| act-don't-tell | 75% | **85%** |
+
+**The most expensive bug never showed up in a metric.** `Path.write_text`
+defaults to `newline=None`, which rewrites every `
+` as `os.linesep`. On
+Windows every LF file Forge touched became CRLF, so editing one line of an
+ordinary repository produced a diff touching *every* line — unreviewable, and
+an instant merge conflict against every other checkout. It affected
+write/edit/append, the ledger's backups and its undo. Reads normalise CRLF to
+`
+` for reliable matching, so writes now restore the file's own style.
+
+The others: the syntax gate used `ast.parse`, which **accepts** `return`,
+`break` and `yield` outside their block (those are symbol-table errors, raised
+by `compile`) — a file Python refuses to run was passing; multi-line edit
+replacements arrived at column zero and dedented code out of its function;
+and a turn was bounded in steps but not in TIME, so one task ran 611 seconds.
+
+**A design rule earned the hard way.** The dangling-reference check was first
+wired per-write. A rename *must* pass through an inconsistent state — the
+definition renamed, callers not yet — so blocking each write trapped the
+agent: T2 fell 3/6 to 1/6 with 83% wasted cycles. Moved to a single turn-end
+check, it recovers 3/6 and still catches the missed caller. **Never gate an
+inherently multi-step operation at each step.**
+
+**Where the ceiling now is.** T3/T4 remain 0. Mechanical failure is largely
+gone — tool reliability 90%, wasted-cycle 2%, HIR 0% — so what is left is
+semantic: the model acts cleanly on the wrong thing. That is the honest
+boundary of the structural-verification thesis, and it is where C2
+(execution-guided candidate search) has to earn its place.
+
 ### 3.6 What the first numbers already tell us
 
 - The remaining tier-1 failure is **deflection, not capability**: ADT 0% on
