@@ -62,6 +62,8 @@ from forge.verify.resolution import (
     dangling_reference_errors,
     inconsistent_boolean_return_errors,
     narrowed_signature_errors,
+    self_recursive_errors,
+    undefined_call_errors,
     undefined_self_call_errors,
 )
 from forge.verify.search import _search_temperatures, search
@@ -915,6 +917,8 @@ class ChatSession:
                 undefined_self_call_errors,
                 broken_method_signature_errors,
                 inconsistent_boolean_return_errors,
+                self_recursive_errors,
+                undefined_call_errors,
             ):
                 before = {self._issue_without_line(b) for b in detector(original)}
                 issues += [

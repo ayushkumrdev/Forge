@@ -17,6 +17,7 @@ languages simply skip this rung until an analyser exists for them."""
 from __future__ import annotations
 
 import ast
+import builtins
 import sys
 from dataclasses import dataclass
 from functools import lru_cache
@@ -459,6 +460,120 @@ def inconsistent_boolean_return_errors(source: str) -> list[str]:
             if isinstance(r.value, ast.BoolOp) and not _is_boolean_expr(r.value)
         ]
     return problems
+
+
+def self_recursive_errors(source: str) -> list[str]:
+    """A function whose whole body is a call to itself.
+
+    Observed live: renaming `pop` to `dequeue` by hand turned
+    `return self._items.pop(0)` into `return self.dequeue()`, so the method
+    called itself forever. It parses, it resolves, and it destroys the
+    process at the first call — a RecursionError in the hidden check was the
+    only sign.
+
+    Narrow on purpose: only a body that is exactly one statement, and that
+    statement a bare call to the function itself. Real recursion has a base
+    case, which means more than one statement."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    problems: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        body = [s for s in node.body if not isinstance(s, ast.Expr | ast.Pass)] or node.body
+        if len(body) != 1:
+            continue
+        statement = body[0]
+        value = (
+            statement.value
+            if isinstance(statement, ast.Return | ast.Expr)
+            else None
+        )
+        if not isinstance(value, ast.Call):
+            continue
+        func = value.func
+        calls_itself = (isinstance(func, ast.Name) and func.id == node.name) or (
+            isinstance(func, ast.Attribute)
+            and func.attr == node.name
+            and isinstance(func.value, ast.Name)
+            and func.value.id in {"self", "cls"}
+        )
+        if calls_itself:
+            problems.append(
+                f"line {statement.lineno}: '{node.name}()' does nothing but call "
+                f"itself, so it recurses forever — this is not what the original "
+                f"code did"
+            )
+    return problems
+
+
+def _bound_names(tree: ast.AST) -> set[str]:
+    """Every name this module binds anywhere: definitions, imports,
+    assignments, parameters, and the various statement targets."""
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            bound.add(node.name)
+            args = getattr(node, "args", None)
+            if args is not None:
+                bound.update(
+                    a.arg
+                    for a in [*args.posonlyargs, *args.args, *args.kwonlyargs]
+                )
+                for extra in (args.vararg, args.kwarg):
+                    if extra is not None:
+                        bound.add(extra.arg)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            bound.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+        elif isinstance(node, ast.Global | ast.Nonlocal):
+            bound.update(node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.Lambda):
+            a = node.args
+            bound.update(x.arg for x in [*a.posonlyargs, *a.args, *a.kwonlyargs])
+    return bound
+
+
+def undefined_call_errors(source: str) -> list[str]:
+    """A function called by bare name that this module never defines or imports.
+
+    Observed live: told to use `validate_email` inside `signup.register`, the
+    model added the call and no import. The file parses, every import in it
+    resolves, and it raises NameError the moment it runs — the module-level
+    counterpart to `undefined_self_call_errors`, and the commonest shape of
+    a cross-file edit that only half-lands.
+
+    Only bare-name calls are considered, and a star import makes the module
+    unanalysable, so it is skipped entirely."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    if any(
+        isinstance(node, ast.ImportFrom)
+        and any(alias.name == "*" for alias in node.names)
+        for node in ast.walk(tree)
+    ):
+        return []
+    known = _bound_names(tree) | set(dir(builtins))
+    seen: dict[str, int] = {}
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id not in known
+        ):
+            seen.setdefault(node.func.id, node.lineno)
+    return [
+        f"line {line}: '{name}' is called here but this file never defines or "
+        f"imports it"
+        for name, line in sorted(seen.items(), key=lambda kv: kv[1])
+    ]
 
 
 def resolution_errors(

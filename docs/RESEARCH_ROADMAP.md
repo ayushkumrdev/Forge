@@ -573,7 +573,40 @@ plan-first step that names a file and leaves it untouched is provably
 incomplete, and noticing costs **no model call**; those steps get one clean
 retry rather than waiting for turn-end coverage to find the gap.
 
-**Running total: nineteen defects, eighteen outside the model.**
+**Measured, 3 seeds on the two tasks that had never scored:**
+
+| run | t2-rename-in-file | t3-wire-validator | combined |
+|---|---|---|---|
+| before plan-first | 0/3 | 0/3 | 0/6 |
+| plan-first | 1/3 | 0/3 | 1/6 (16.7%) |
+| + requirement-shaped guidance, recovery | **2/3** | **1/3** | **3/6 (50%)** |
+
+**`t3-wire-validator` passed for the first time.** ADT 100%, WCR 8.3%,
+HIR 0%. The two solved t2 runs took **two tool calls and ~15 seconds** —
+one `rename_symbol` per name, which is the ideal trace for that task and
+what the requirement-shaped guidance was built to produce.
+
+Tracing the three remaining failures found two more mechanical defects, and
+neither is semantic:
+
+4. **`self_recursive_errors`**: hand-editing the rename turned
+   `return self._items.pop(0)` into `return self.dequeue()`, so the method
+   called itself forever. It parses, it resolves, and it kills the process
+   on the first call — a `RecursionError` in the hidden check was the only
+   sign. Flagged only when the whole body is a call to itself; real
+   recursion has a base case, which means more than one statement.
+5. **`undefined_call_errors`**: told to use `validate_email` inside
+   `signup.register`, the model added the call and no import. This is the
+   module-level counterpart to `undefined_self_call_errors` and the
+   commonest shape of a cross-file edit that only half-lands. Bare-name
+   calls only; a star import makes the module unanalysable, so it is
+   skipped entirely.
+
+Both were validated the way every check here now is, before being trusted:
+run over all of `src/` and `tests/`, **zero findings**, and pinned by a test
+that re-runs them over the source tree.
+
+**Running total: twenty-one defects, twenty outside the model.**
 
 ### 3.6 What the first numbers already tell us
 

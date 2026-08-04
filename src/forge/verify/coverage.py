@@ -163,7 +163,40 @@ def decompose(llm: LLMClient, request: str, usage: Usage | None = None) -> list[
     except (StructuredOutputError, Exception):  # noqa: BLE001 — never break the turn
         return []
     real = [r for r in result.requirements if not _META_REQUIREMENT_RE.search(r.text)]
-    return real[:_MAX_REQUIREMENTS]
+    return _drop_restatements(real)[:_MAX_REQUIREMENTS]
+
+
+_WORD_RE = re.compile(r"[a-z0-9_]+")
+# words that carry no requirement content, so they must not make two
+# requirements look different from each other
+_FILLER = frozenset(
+    {"a", "an", "the", "is", "are", "be", "to", "of", "in", "on", "and", "that",
+     "it", "its", "this", "should", "must", "will", "every", "all", "same"}
+)
+
+
+def _content_words(text: str) -> frozenset[str]:
+    return frozenset(_WORD_RE.findall(text.lower())) - _FILLER
+
+
+def _drop_restatements(requirements: list[Requirement]) -> list[Requirement]:
+    """Remove a requirement that only restates one already in the list.
+
+    Under plan-first each requirement costs a whole focused step, and a step
+    that redoes finished work can undo it — the model re-edits a file that
+    is already correct. Deliberately narrow: only an exact restatement or a
+    strict subset is dropped. Genuinely overlapping-but-different wording is
+    left alone, because losing a real requirement is far worse than
+    attempting one twice."""
+    kept: list[Requirement] = []
+    kept_words: list[frozenset[str]] = []
+    for requirement in requirements:
+        words = _content_words(requirement.text)
+        if words and any(words <= earlier for earlier in kept_words):
+            continue
+        kept.append(requirement)
+        kept_words.append(words)
+    return kept
 
 
 def build_evidence(diff: str, changed_files: list[str], commands: list[str]) -> str:

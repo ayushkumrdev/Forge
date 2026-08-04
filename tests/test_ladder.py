@@ -9,6 +9,8 @@ from forge.verify.resolution import (
     narrowed_signature_errors,
     public_names,
     resolution_errors,
+    self_recursive_errors,
+    undefined_call_errors,
 )
 
 # -- L2 resolution ---------------------------------------------------------------
@@ -879,3 +881,86 @@ def test_the_detector_is_silent_on_forge_s_own_source():
         )
     ]
     assert findings == []
+
+
+# -- runaway recursion ------------------------------------------------------------
+# From a live failure: hand-editing a rename turned
+# `return self._items.pop(0)` into `return self.dequeue()`. It parses, it
+# resolves, and it kills the process on the first call.
+
+
+def test_a_method_whose_body_only_calls_itself_is_reported():
+    source = "class Q:\n    def dequeue(self):\n        return self.dequeue()\n"
+    problems = self_recursive_errors(source)
+    assert len(problems) == 1 and "recurses forever" in problems[0]
+
+
+def test_recursion_with_a_base_case_is_fine():
+    source = "def fact(n):\n    if n <= 1:\n        return 1\n    return fact(n - 1) * n\n"
+    assert self_recursive_errors(source) == []
+
+
+def test_a_plain_delegating_call_is_not_recursion():
+    source = "class Q:\n    def dequeue(self):\n        return self._items.pop(0)\n"
+    assert self_recursive_errors(source) == []
+
+
+def test_a_module_level_function_calling_itself_is_reported():
+    assert len(self_recursive_errors("def loop():\n    return loop()\n")) == 1
+
+
+# -- names that do not exist ------------------------------------------------------
+# The module-level counterpart to undefined_self_call_errors, and the
+# commonest shape of a cross-file edit that only half-lands: the call was
+# added, the import was not.
+
+
+def test_calling_a_function_that_is_never_imported_is_reported():
+    source = (
+        "def register(name, email):\n"
+        "    if not validate_email(email):\n"
+        "        raise ValueError('invalid email')\n"
+        "    return name\n"
+    )
+    problems = undefined_call_errors(source)
+    assert len(problems) == 1 and "validate_email" in problems[0]
+
+
+def test_an_imported_name_is_fine():
+    source = (
+        "from validators import validate_email\n\n\n"
+        "def register(email):\n"
+        "    return validate_email(email)\n"
+    )
+    assert undefined_call_errors(source) == []
+
+
+def test_builtins_locals_and_parameters_are_all_fine():
+    source = (
+        "import json\n\n\n"
+        "def go(callback, items):\n"
+        "    def inner(x):\n"
+        "        return x\n"
+        "    total = sum(len(i) for i in items)\n"
+        "    return callback(inner(total)), json.dumps({}), sorted(items)\n"
+    )
+    assert undefined_call_errors(source) == []
+
+
+def test_a_star_import_makes_the_module_unanalysable():
+    """Anything could be in scope, so the check must stand down entirely."""
+    source = "from helpers import *\n\n\ndef go():\n    return whatever()\n"
+    assert undefined_call_errors(source) == []
+
+
+def test_neither_new_detector_fires_on_forge_s_own_source():
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "src"
+    for detector in (undefined_call_errors, self_recursive_errors):
+        findings = [
+            problem
+            for path in root.rglob("*.py")
+            for problem in detector(path.read_text(encoding="utf-8"))
+        ]
+        assert findings == [], f"{detector.__name__}: {findings}"

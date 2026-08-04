@@ -823,3 +823,41 @@ def test_plan_first_respects_the_turn_time_budget(workspace, monkeypatch):
     assert not any(
         "Do exactly this one thing" in m.content for req in llm.requests for m in req
     )
+
+
+# -- decomposition hygiene --------------------------------------------------------
+
+
+def _decomposed(*texts):
+    items = ", ".join(
+        f'{{"id": {i + 1}, "text": "{t}"}}' for i, t in enumerate(texts)
+    )
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content=f'{{"requirements": [{items}]}}')
+    ])
+    return [r.text for r in decompose(llm, "whatever")]
+
+
+def test_a_requirement_that_only_restates_another_is_dropped():
+    """Under plan-first each requirement costs a whole step, and a step that
+    redoes finished work can undo it."""
+    assert _decomposed(
+        "push is renamed to enqueue in taskqueue.py",
+        "push is renamed",
+    ) == ["push is renamed to enqueue in taskqueue.py"]
+
+
+def test_two_genuinely_different_requirements_both_survive():
+    assert len(_decomposed(
+        "push is renamed to enqueue",
+        "pop is renamed to dequeue",
+    )) == 2
+
+
+def test_overlapping_but_distinct_wording_is_left_alone():
+    """Losing a real requirement is far worse than attempting one twice, so
+    anything short of a restatement is kept."""
+    assert len(_decomposed(
+        "rename push to enqueue",
+        "update every call site of push to use enqueue",
+    )) == 2
