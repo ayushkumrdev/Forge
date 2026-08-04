@@ -222,6 +222,16 @@ class EditFileTool(Tool):
     def run(self, path: str, old_string: str, new_string: str) -> ToolResult:
         resolved = self._guard.check_write_path(path)
         if not old_string:
+            # The right advice depends on whether the file exists at all:
+            # append_to_file cannot create one, and pointing the model at it
+            # for a missing file just produces a second failure.
+            if not resolved.exists():
+                return ToolResult(
+                    ok=False,
+                    error=f"old_string must not be empty, and {path} does not "
+                    "exist yet. Call write_file with the complete content to "
+                    "create it.",
+                )
             return ToolResult(
                 ok=False,
                 error="old_string must not be empty. To ADD new code to the end "

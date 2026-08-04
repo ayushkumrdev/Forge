@@ -43,6 +43,7 @@ from forge.tools.rename import RenameSymbolTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
+from forge.tools.testing import RunTestsTool
 from forge.tools.vision import IMAGE_EXTENSIONS, ReadImageTool
 from forge.tools.web import FetchUrlTool, WebSearchTool
 from forge.verify.coverage import (
@@ -102,8 +103,9 @@ Example — read, then edit:
    unread files. 3. CHANGE — edit_file for surgical changes (old_string
    copied EXACTLY from the read output, with enough lines to be unique);
    append_to_file to ADD a new function/class to an existing file;
-   write_file for new files or full rewrites. 4. VERIFY — run_command the
-   tests or a compile check and read the output. 5. REPORT — plain-text
+   write_file for new files or full rewrites. 4. VERIFY — run_tests (it
+   picks the right runner; do not guess at pytest vs unittest) or
+   run_command a compile check, and read the output. 5. REPORT — plain-text
    summary: what changed, which files, how you verified it.
 
 ## Recovery playbook
@@ -125,7 +127,7 @@ Example — read, then edit:
 ## Tools available
 read_file · write_file · append_to_file · edit_file · rename_symbol ·
 delete_file ·
-list_dir · run_command ·
+list_dir · run_command · run_tests (find and run the project's suite) ·
 run_powershell (full PowerShell on Windows: file ops, processes, env,
 package managers) · grep · find_files · search_code (by meaning) ·
 find_symbol (find definitions) · who_imports (what depends on a file) ·
@@ -392,6 +394,7 @@ class ChatSession:
             DeleteFileTool(self._guard, self.ledger),
             ListDirTool(self._guard),
             RunCommandTool(self._guard, self.workspace, self.settings.command_timeout_s),
+            RunTestsTool(self._guard, self.workspace, self.settings.command_timeout_s),
             GrepTool(self.workspace),
             GlobTool(self.workspace),
             GitTool(self.workspace),
@@ -673,9 +676,9 @@ class ChatSession:
                 result = self.registry.execute(call.name, call.arguments)
                 if result.ok and call.name in _FILE_MUTATING_TOOLS:
                     turn_mutated = True
-                if result.ok and call.name in ("run_command", "run_powershell"):
+                if result.ok and call.name in ("run_command", "run_powershell", "run_tests"):
                     turn_ran_command = True
-                    command = str(call.arguments.get("command", ""))[:200]
+                    command = str(call.arguments.get("command", "run_tests"))[:200]
                     if command:
                         commands_run.append(command)
                 self.recorder.event(

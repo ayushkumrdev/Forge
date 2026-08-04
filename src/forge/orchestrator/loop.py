@@ -45,6 +45,7 @@ from forge.tools.rename import RenameSymbolTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
+from forge.tools.testing import RunTestsTool
 from forge.tools.web import FetchUrlTool, WebSearchTool
 from forge.verify.ladder import Ladder
 
@@ -157,6 +158,7 @@ class ExecutionLoop:
             RunCommandTool(
                 self._guard, self.workspace, self.settings.command_timeout_s
             ),
+            RunTestsTool(self._guard, self.workspace, self.settings.command_timeout_s),
             GrepTool(self.workspace),
             GlobTool(self.workspace),
             GitTool(self.workspace),
