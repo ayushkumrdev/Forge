@@ -379,6 +379,43 @@ semantic: the model acts cleanly on the wrong thing. That is the honest
 boundary of the structural-verification thesis, and it is where C2
 (execution-guided candidate search) has to earn its place.
 
+### 3.5f C2 shipped and measured: search works, once it has something worth searching
+
+Matched comparison on tier 2, same three seeds, identical code, only
+`search_candidates` differing:
+
+| | k=1 (control) | k=3 (search) |
+| --- | --- | --- |
+| **TSR** | 2/9 (22.2%) | **4/9 (44.4%)** |
+| t2-add-and-use | 2/3 | 2/3 |
+| t2-three-guards | **0/3** | **2/3** |
+| t2-rename-in-file | 0/3 | 0/3 |
+
+The gain is concentrated exactly where the mechanism predicts: `three-guards`
+asks for three independent behaviours, so different samples genuinely differ
+and one of them gets it right. `add-and-use` was already reliable and search
+does not disturb it; `rename-in-file` fails for a reason no amount of
+resampling fixes. **At n=9 this is not significant** — it is two tasks — but
+it is a matched design and the per-task pattern is mechanistically
+interpretable rather than noise-shaped.
+
+**The first attempt was WORSE than no search (2/6 vs 3/6), and the reason is
+the most useful thing here.** The mechanism was fine; what it was pointed at
+was not. The thinker had decomposed "rename push to enqueue and pop to
+dequeue, update every use" into five requirements: the two renames, then
+"update all occurrences of push" and "...of pop" — the *same edits again* —
+and finally "ensure that no functionality is broken". Search dutifully spent
+three model attempts re-doing completed work, and three more chasing a wish
+that cannot be checked.
+
+**Search amplifies whatever it is pointed at.** Test-time compute over a bad
+task decomposition buys a more expensive wrong answer. Fixing the
+decomposition (explicit non-overlap, "a rename includes its callers", a ban
+on quality-restating requirements, plus a filter for the ones the model
+slips in anyway) is what turned the mechanism from a regression into a gain.
+Any future search-based contribution should be reported with the quality of
+its search space, not just its budget.
+
 ### 3.6 What the first numbers already tell us
 
 - The remaining tier-1 failure is **deflection, not capability**: ADT 0% on
