@@ -699,3 +699,37 @@ def test_structural_nudge_survives_a_missing_file(tmp_path):
     session = ChatSession(repo, MockLLMClient([]), ForgeSettings(), session_id="nudge2")
     nudge = session._structural_nudge(["ghost.py: line 1: 'x' is still called here"])
     assert "'x' is still called here" in nudge  # still reports the problem
+
+
+def test_a_half_finished_rename_is_pointed_at_rename_symbol(tmp_path):
+    """The model answers a generic 'fix it' with a stale old_string and never
+    recovers. When the breakage is rename-shaped, name the tool that does the
+    whole rename correctly."""
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.mock import MockLLMClient
+
+    repo = _repo(tmp_path)
+    (repo / "q.py").write_text("class Q:\n    def go(self):\n        return 1\n", "utf-8")
+    session = ChatSession(repo, MockLLMClient([]), ForgeSettings(), session_id="rn-nudge")
+    nudge = session._structural_nudge(
+        ["q.py: line 9: 'push' is still called here, but its definition was "
+         "removed or renamed in this change"]
+    )
+    assert "rename_symbol" in nudge
+    assert "Do NOT use edit_file for a rename" in nudge
+
+
+def test_a_non_rename_problem_keeps_the_generic_remedy(tmp_path):
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.mock import MockLLMClient
+
+    repo = _repo(tmp_path)
+    (repo / "q.py").write_text("class Q:\n    def go(self):\n        return 1\n", "utf-8")
+    session = ChatSession(repo, MockLLMClient([]), ForgeSettings(), session_id="gen")
+    nudge = session._structural_nudge(
+        ["q.py: line 3: self.missing() is called but 'Q' does not define missing"]
+    )
+    assert "copying old_string EXACTLY" in nudge
+    assert "rename_symbol" not in nudge

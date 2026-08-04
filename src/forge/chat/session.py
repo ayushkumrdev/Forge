@@ -734,13 +734,30 @@ class ChatSession:
                 content = content[:4_000] + "\n... [truncated]"
             sections.append(f"--- {name} as it is NOW ---\n{content}")
         listing = "\n".join(f"- {p}" for p in problems)
+        # A half-finished rename is the commonest shape here, and edit_file is
+        # the wrong instrument for it: observed repeatedly, the model answers
+        # with an old_string that no longer exists and never recovers. Point
+        # it at the tool that does the whole rename in one correct operation.
+        rename_shaped = any("removed or renamed" in p for p in problems)
+        remedy = (
+            "This is a half-finished rename. Use rename_symbol for it — one "
+            "call per name, and it updates the definition AND every reference "
+            "together:\n"
+            '{"name": "rename_symbol", "arguments": {"path": "<file>", '
+            '"old_name": "<old>", "new_name": "<new>"}}\n'
+            "Do NOT use edit_file for a rename; it matches text and will hit a "
+            "call site instead of the definition."
+            if rename_shaped
+            else "Fix every one of them now, copying old_string EXACTLY from the "
+            "content above. If an edit fails twice, use write_file with the "
+            "complete corrected file instead."
+        )
         return (
             "The change is incomplete — this code now refers to something that "
             f"does not exist:\n{listing}\n\n"
             + "\n\n".join(sections)
-            + "\n\nFix every one of them now, copying old_string EXACTLY from "
-            "the content above. If an edit fails twice, use write_file with the "
-            "complete corrected file instead."
+            + "\n\n"
+            + remedy
         )
 
     @staticmethod
