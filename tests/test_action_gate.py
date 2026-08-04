@@ -293,3 +293,63 @@ def test_powershell_registered_on_windows(workspace):
         assert "run_powershell" in session.registry.names()
     else:
         assert "run_powershell" not in session.registry.names()
+
+
+def test_turn_stops_at_its_time_limit(workspace):
+    """A turn must be bounded in TIME, not only in steps. Coverage passes,
+    focused retries and a slow model stack up: one benchmark task was
+    observed running 611 seconds."""
+    import time as _time
+
+    from forge.config import ForgeSettings
+
+    class SlowLLM(MockLLMClient):
+        def chat(self, messages, **kwargs):
+            _time.sleep(0.05)
+            return super().chat(messages, **kwargs)
+
+    reading = ChatMessage(
+        role="assistant",
+        tool_calls=[ToolCall(name="read_file", arguments={"path": "app.py"})],
+    )
+    (workspace / "app.py").write_text("x = 1\n", encoding="utf-8")
+    llm = SlowLLM([reading] * 40)
+    settings = ForgeSettings(max_turn_seconds=0.2)
+    session = ChatSession(workspace, llm, settings, session_id="timeout")
+    reply = session.send("fix the thing")
+    assert "time limit" in reply
+    assert len(llm.requests) < 40  # stopped early, did not burn the whole budget
+
+
+def test_time_limit_can_be_disabled(workspace):
+    from forge.config import ForgeSettings
+
+    llm = MockLLMClient([ChatMessage(role="assistant", content="done")])
+    settings = ForgeSettings(max_turn_seconds=0)
+    session = ChatSession(workspace, llm, settings, session_id="notimeout")
+    assert session.send("hello") == "done"
+
+
+def test_timeout_reports_what_was_already_changed(workspace):
+    import time as _time
+
+    from forge.config import ForgeSettings
+
+    class SlowLLM(MockLLMClient):
+        def chat(self, messages, **kwargs):
+            _time.sleep(0.05)
+            return super().chat(messages, **kwargs)
+
+    write = ChatMessage(
+        role="assistant",
+        tool_calls=[ToolCall(name="write_file", arguments={"path": "a.py", "content": "x=1\n"})],
+    )
+    read = ChatMessage(
+        role="assistant", tool_calls=[ToolCall(name="read_file", arguments={"path": "a.py"})]
+    )
+    llm = SlowLLM([write] + [read] * 40)
+    session = ChatSession(
+        workspace, llm, ForgeSettings(max_turn_seconds=0.25), session_id="t2"
+    )
+    reply = session.send("add a thing")
+    assert "a.py" in reply  # the user is told what landed before the cutoff

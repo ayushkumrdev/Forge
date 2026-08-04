@@ -22,6 +22,10 @@ class ForgeSettings(BaseSettings):
 
     # Agent loop limits (stopping criteria)
     max_agent_steps: int = 25
+    # Wall-clock ceiling for one chat turn. The step budget bounds STEPS, not
+    # TIME: coverage passes, focused retries and a slow model stack up, and a
+    # single request was observed taking over ten minutes. 0 disables.
+    max_turn_seconds: float = 300.0
     max_review_cycles: int = 3
     max_plan_tasks: int = 8
 

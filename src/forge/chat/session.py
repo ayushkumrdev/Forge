@@ -13,6 +13,7 @@ import os
 import platform
 import re
 import sys
+import time
 from pathlib import Path
 
 from forge.agents.base import constrained_tool_retry, recover_inline_tool_call
@@ -443,9 +444,27 @@ class ChatSession:
         self.recorder.event(
             "chat", "turn_started", action_turn=action_turn, effort=self.effort
         )
+        deadline = (
+            time.monotonic() + self.settings.max_turn_seconds
+            if self.settings.max_turn_seconds > 0
+            else None
+        )
         for _step in range(self._step_budget()):
             if self._cancelled():
                 return self._finish_stopped()
+            if deadline is not None and time.monotonic() > deadline:
+                self.recorder.event("chat", "turn_timeout", output=str(self.ledger.changed_files))
+                return self._finish_turn(
+                    "Stopped: this turn hit its time limit "
+                    f"({self.settings.max_turn_seconds:.0f}s). "
+                    + (
+                        "Changed so far: " + ", ".join(self.ledger.changed_files)
+                        if self.ledger.changed_files
+                        else "Nothing was changed."
+                    )
+                    + " Ask again to continue.",
+                    action_turn, turn_mutated, turn_ran_command,
+                )
             if self.on_step is not None:
                 self.on_step()
             response = self.llm.chat(
@@ -623,17 +642,9 @@ class ChatSession:
                     self.history.append(ChatMessage(role="user", content=_GENIUS_CHECK))
                     continue
                 self.history.append(message.model_copy(update={"content": content}))
-                self.recorder.event(
-                    "chat",
-                    "turn_finished",
-                    action_turn=action_turn,
-                    mutated=turn_mutated,
-                    ran_command=turn_ran_command,
-                    unverified_claim=(not turn_ran_command and claims_verification(content)),
-                    deflected=bool(action_turn and not turn_mutated),
+                return self._finish_turn(
+                    content, action_turn, turn_mutated, turn_ran_command, append=False
                 )
-                self.save_transcript()
-                return content
 
             self.history.append(message)
             for call in message.tool_calls:
@@ -662,10 +673,10 @@ class ChatSession:
                     )
                 )
 
-        self.save_transcript()
-        note = "Stopped: step budget exhausted for this turn."
-        self.history.append(ChatMessage(role="assistant", content=note))
-        return note
+        return self._finish_turn(
+            "Stopped: step budget exhausted for this turn.",
+            action_turn, turn_mutated, turn_ran_command,
+        )
 
     def set_effort(self, level: str) -> None:
         if level not in ("fast", "smart", "genius"):
@@ -808,6 +819,30 @@ class ChatSession:
         if _PROMISE_RE.search(content):
             return _PROMISE_NUDGE
         return None
+
+    def _finish_turn(
+        self,
+        content: str,
+        action_turn: bool,
+        mutated: bool,
+        ran_command: bool,
+        append: bool = True,
+    ) -> str:
+        """End the turn: record what happened and persist. Every exit path
+        goes through here so the metrics never miss a turn."""
+        if append:
+            self.history.append(ChatMessage(role="assistant", content=content))
+        self.recorder.event(
+            "chat",
+            "turn_finished",
+            action_turn=action_turn,
+            mutated=mutated,
+            ran_command=ran_command,
+            unverified_claim=(not ran_command and claims_verification(content)),
+            deflected=bool(action_turn and not mutated),
+        )
+        self.save_transcript()
+        return content
 
     def _cancelled(self) -> bool:
         return self.should_stop is not None and self.should_stop()
