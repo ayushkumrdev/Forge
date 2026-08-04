@@ -462,3 +462,210 @@ def test_turn_end_catches_a_botched_rename(tmp_path):
     reply = session.send("rename push to enqueue and pop to dequeue")
     assert reply == "Fixed the method name too."
     assert "def dequeue" in (repo / "q.py").read_text(encoding="utf-8")
+
+
+# -- broken method signatures -----------------------------------------------------
+# Observed live on t2-rename-in-file: renaming push -> enqueue, the model
+# rewrote `def push(self, item)` as `def enqueue(item)` and dropped the
+# receiver. Parses, resolves, the method exists — and every instance call
+# raises TypeError.
+
+
+def test_method_that_lost_self_is_caught():
+    from forge.verify.resolution import broken_method_signature_errors
+
+    source = (
+        "class Queue:\n"
+        "    def __init__(self):\n"
+        "        self._items = []\n\n"
+        "    def enqueue(item):\n"
+        "        pass\n"
+    )
+    problems = broken_method_signature_errors(source)
+    assert len(problems) == 1
+    assert "Queue.enqueue" in problems[0]
+    assert "not 'self'" in problems[0]
+
+
+def test_method_with_no_arguments_at_all_is_caught():
+    from forge.verify.resolution import broken_method_signature_errors
+
+    problems = broken_method_signature_errors("class A:\n    def go():\n        pass\n")
+    assert "missing 'self'" in problems[0]
+
+
+def test_static_and_class_methods_are_allowed():
+    from forge.verify.resolution import broken_method_signature_errors
+
+    source = (
+        "class A:\n"
+        "    def normal(self): pass\n\n"
+        "    @staticmethod\n"
+        "    def s(x): pass\n\n"
+        "    @classmethod\n"
+        "    def c(cls): pass\n\n"
+        "    @typing.no_type_check\n"
+        "    def decorated(self): pass\n"
+    )
+    assert broken_method_signature_errors(source) == []
+
+
+def test_nested_functions_are_not_methods():
+    from forge.verify.resolution import broken_method_signature_errors
+
+    source = (
+        "class A:\n"
+        "    def f(self):\n"
+        "        def helper(x):\n"
+        "            return x\n"
+        "        return helper\n"
+    )
+    assert broken_method_signature_errors(source) == []
+
+
+def test_module_level_functions_are_untouched():
+    from forge.verify.resolution import broken_method_signature_errors
+
+    assert broken_method_signature_errors("def free(x):\n    return x\n") == []
+
+
+def test_turn_end_catches_a_rename_that_dropped_self(tmp_path):
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage, ToolCall
+    from forge.llm.mock import MockLLMClient
+
+    repo = _repo(tmp_path)
+    before = "class Queue:\n    def push(self, item):\n        self._items.append(item)\n"
+    broken = "class Queue:\n    def enqueue(item):\n        self._items.append(item)\n"
+    fixed = "class Queue:\n    def enqueue(self, item):\n        self._items.append(item)\n"
+    (repo / "q.py").write_text(before, encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "q.py", "content": broken})]),
+        ChatMessage(role="assistant", content="Renamed."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "q.py", "content": fixed})]),
+        ChatMessage(role="assistant", content="Restored self."),
+    ])
+    session = ChatSession(repo, llm, ForgeSettings(), session_id="sig")
+    reply = session.send("rename push to enqueue")
+    assert reply == "Restored self."
+    assert "def enqueue(self, item)" in (repo / "q.py").read_text(encoding="utf-8")
+
+
+def test_pre_existing_bad_signature_never_blocks(tmp_path):
+    """A file that already had a selfless method must not trap the agent."""
+    from forge.verify.resolution import broken_method_signature_errors
+
+    before = "class A:\n    def bad(x): pass\n"
+    after = "class A:\n    def bad(x): pass\n\n    def added(self): pass\n"
+    stale = {p.partition(": ")[2] for p in broken_method_signature_errors(before)}
+    fresh = [
+        p for p in broken_method_signature_errors(after)
+        if p.partition(": ")[2] not in stale
+    ]
+    assert fresh == []
+
+
+def test_structural_check_reruns_after_a_partial_fix(tmp_path):
+    """A first fix attempt often repairs one break and leaves another. The
+    check must run again, not once. (Observed live: the model fixed the missed
+    caller and left a method without its `self`.)"""
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage, ToolCall
+    from forge.llm.mock import MockLLMClient
+
+    repo = _repo(tmp_path)
+    before = (
+        "class Queue:\n"
+        "    def push(self, item):\n"
+        "        self._items.append(item)\n\n\n"
+        "def fill(q, v):\n"
+        "    q.push(v)\n"
+    )
+    # step 1: renames the method AND drops self AND leaves the caller behind
+    step1 = (
+        "class Queue:\n"
+        "    def enqueue(item):\n"
+        "        self._items.append(item)\n\n\n"
+        "def fill(q, v):\n"
+        "    q.push(v)\n"
+    )
+    # step 2: fixes the caller, still missing self
+    step2 = step1.replace("q.push(v)", "q.enqueue(v)")
+    # step 3: finally correct
+    step3 = step2.replace("def enqueue(item)", "def enqueue(self, item)")
+    (repo / "q.py").write_text(before, encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "q.py", "content": step1})]),
+        ChatMessage(role="assistant", content="Renamed."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "q.py", "content": step2})]),
+        ChatMessage(role="assistant", content="Fixed the caller."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "q.py", "content": step3})]),
+        ChatMessage(role="assistant", content="Restored self too."),
+    ])
+    session = ChatSession(repo, llm, ForgeSettings(), session_id="rerun")
+    reply = session.send("rename push to enqueue")
+    assert reply == "Restored self too."
+    assert "def enqueue(self, item)" in (repo / "q.py").read_text(encoding="utf-8")
+    # it took two corrective rounds, i.e. the check ran more than once
+    prompts = [m.content for m in session.history if "no longer exists" in m.content]
+    assert len(prompts) == 2
+
+
+def test_structural_check_is_bounded(tmp_path):
+    """A model that never fixes it must still end the turn."""
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage, ToolCall
+    from forge.llm.mock import MockLLMClient
+
+    repo = _repo(tmp_path)
+    before = "class Q:\n    def push(self, i):\n        pass\n\n\ndef f(q):\n    q.push(1)\n"
+    broken = "class Q:\n    def enqueue(self, i):\n        pass\n\n\ndef f(q):\n    q.push(1)\n"
+    (repo / "q.py").write_text(before, encoding="utf-8")
+    write = ChatMessage(role="assistant", tool_calls=[ToolCall(
+        name="write_file", arguments={"path": "q.py", "content": broken})])
+    stuck = ChatMessage(role="assistant", content="I renamed it.")
+    llm = MockLLMClient([write, stuck, write, stuck, write, stuck, write, stuck])
+    session = ChatSession(repo, llm, ForgeSettings(), session_id="bounded")
+    assert session.send("rename push to enqueue") == "I renamed it."
+    prompts = [m.content for m in session.history if "no longer exists" in m.content]
+    assert len(prompts) == 2  # bounded at _MAX_STRUCTURAL_PASSES
+
+
+def test_builtin_container_calls_are_not_mistaken_for_a_missed_caller():
+    """Regression: renaming a method `pop` flagged the body's own
+    `self._items.pop(0)` — a LIST pop — as a caller left behind. The check
+    matched by name and ignored the receiver."""
+    from forge.verify.resolution import dangling_reference_errors
+
+    before = (
+        "class Queue:\n"
+        "    def pop(self):\n"
+        "        return self._items.pop(0)\n"
+    )
+    after = before.replace("def pop(self):", "def dequeue(self):")
+    assert dangling_reference_errors(before, after) == []
+
+
+def test_attribute_chain_receivers_are_ignored():
+    from forge.verify.resolution import dangling_reference_errors
+
+    before = "class A:\n    def send(self): pass\n    def go(self): self.conn.send(1)\n"
+    after = before.replace("def send(self): pass", "def transmit(self): pass")
+    # self.conn.send() is a call on conn, not on the renamed method
+    assert dangling_reference_errors(before, after) == []
+
+
+def test_a_plain_receiver_is_still_checked():
+    from forge.verify.resolution import dangling_reference_errors
+
+    before = "class A:\n    def push(self, v): pass\n\n\ndef fill(q, v):\n    q.push(v)\n"
+    after = before.replace("def push(self, v)", "def enqueue(self, v)")
+    assert dangling_reference_errors(before, after)

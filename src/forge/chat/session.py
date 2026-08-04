@@ -55,6 +55,7 @@ from forge.verify.coverage import (
 )
 from forge.verify.ladder import Ladder
 from forge.verify.resolution import (
+    broken_method_signature_errors,
     dangling_reference_errors,
     undefined_self_call_errors,
 )
@@ -210,6 +211,7 @@ _PROMISE_RE = re.compile(
 )
 _MAX_ACTION_NUDGES = 2
 _MAX_COVERAGE_PASSES = 2
+_MAX_STRUCTURAL_PASSES = 2
 
 # "Did it act?" means "did it change the repository". run_command is a
 # mutating tool because it needs permission to touch system state, but a turn
@@ -438,7 +440,7 @@ class ChatSession:
         nudged = False
         genius_checked = False
         coverage_passes = 0
-        dangling_checked = False
+        dangling_passes = 0
         requirements: list[Requirement] | None = None
         commands_run: list[str] = []
         # the evaluation harness reconstructs per-turn behaviour from the trace
@@ -551,10 +553,15 @@ class ChatSession:
                 # write. Renaming a definition necessarily breaks its callers
                 # until the next edit repairs them, so blocking each write
                 # traps the agent mid-operation.
-                if turn_mutated and not dangling_checked:
-                    dangling_checked = True
+                # Re-checked after each fix attempt, not once: a first attempt
+                # often repairs one break and leaves another (observed live —
+                # the model fixed the missed caller and left a method without
+                # its `self`). Bounded so a model that cannot fix it still
+                # ends the turn.
+                if turn_mutated and dangling_passes < _MAX_STRUCTURAL_PASSES:
                     stale = self._dangling_references()
                     if stale:
+                        dangling_passes += 1
                         self.recorder.event("chat", "dangling_reference", output="; ".join(stale))
                         self.history.append(message.model_copy(update={"content": content}))
                         self.history.append(
@@ -725,13 +732,13 @@ class ChatSession:
             issues = dangling_reference_errors(original, current)
             # only NEW self-call breakage counts; a pre-existing one is not
             # this change's fault and must never trap the agent
-            before = set(undefined_self_call_errors(original))
-            issues += [
-                issue
-                for issue in undefined_self_call_errors(current)
-                if self._issue_without_line(issue)
-                not in {self._issue_without_line(b) for b in before}
-            ]
+            for detector in (undefined_self_call_errors, broken_method_signature_errors):
+                before = {self._issue_without_line(b) for b in detector(original)}
+                issues += [
+                    issue
+                    for issue in detector(current)
+                    if self._issue_without_line(issue) not in before
+                ]
             problems.extend(f"{name}: {issue}" for issue in issues)
         return problems[:4]
 

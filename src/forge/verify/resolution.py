@@ -139,8 +139,28 @@ def _defined_names(source: str) -> set[str]:
     }
 
 
+# Method names that belong to builtin containers and strings. A call to one
+# of these says nothing about a renamed method of the same name, and matching
+# them produced a false positive on the very first real rename: after
+# `pop` was renamed to `dequeue`, the body's own `self._items.pop(0)` — a
+# LIST pop — was reported as a caller left behind.
+_BUILTIN_METHOD_NAMES = frozenset(
+    {
+        "append", "extend", "insert", "remove", "pop", "clear", "index",
+        "count", "sort", "reverse", "copy", "keys", "values", "items", "get",
+        "setdefault", "update", "add", "discard", "union", "join", "split",
+        "strip", "lstrip", "rstrip", "replace", "format", "encode", "decode",
+        "startswith", "endswith", "lower", "upper", "read", "write", "close",
+    }
+)
+
+
 def _called_names(source: str) -> dict[str, int]:
-    """Names that are CALLED in the file, mapped to their line number."""
+    """Names CALLED in the file, mapped to a line number.
+
+    Only calls whose receiver is a plain name are counted — `queue.push(v)`
+    yes, `self._items.pop(0)` no. A call through an attribute chain is being
+    made on some other object, not on the thing that was renamed."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -150,14 +170,68 @@ def _called_names(source: str) -> dict[str, int]:
         if not isinstance(node, ast.Call):
             continue
         func = node.func
-        name = (
-            func.id if isinstance(func, ast.Name)
-            else func.attr if isinstance(func, ast.Attribute)
-            else None
-        )
-        if name is not None:
-            calls.setdefault(name, node.lineno)
+        if isinstance(func, ast.Name):
+            calls.setdefault(func.id, node.lineno)
+        elif (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.attr not in _BUILTIN_METHOD_NAMES
+        ):
+            calls.setdefault(func.attr, node.lineno)
     return calls
+
+
+_SELFLESS_OK = frozenset({"staticmethod", "classmethod"})
+
+
+def _decorator_names(node: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    names = set()
+    for decorator in node.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, ast.Attribute):
+            names.add(target.attr)
+    return names
+
+
+def broken_method_signature_errors(source: str) -> list[str]:
+    """A method that lost its `self`.
+
+    Observed live: renaming `push` to `enqueue`, the model rewrote
+    `def push(self, item)` as `def enqueue(item)` and dropped the receiver.
+    The file parses, every name resolves, the method exists — and every call
+    on an instance raises TypeError. Nothing else catches it.
+
+    Only plain methods are judged: staticmethod and classmethod legitimately
+    have no `self`, and a nested function inside a method is not a method."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    problems: list[str] = []
+    for klass in ast.walk(tree):
+        if not isinstance(klass, ast.ClassDef):
+            continue
+        for item in klass.body:  # body, not walk: nested defs are not methods
+            if not isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            if _decorator_names(item) & _SELFLESS_OK:
+                continue
+            args = item.args
+            first = (args.posonlyargs + args.args)[:1]
+            if not first:
+                problems.append(
+                    f"line {item.lineno}: method '{klass.name}.{item.name}' takes no "
+                    "arguments at all — it is missing 'self'"
+                )
+            elif first[0].arg not in ("self", "cls"):
+                problems.append(
+                    f"line {item.lineno}: method '{klass.name}.{item.name}' has "
+                    f"'{first[0].arg}' as its first parameter, not 'self' — "
+                    "calling it on an instance will fail"
+                )
+    return problems
 
 
 def undefined_self_call_errors(source: str) -> list[str]:
