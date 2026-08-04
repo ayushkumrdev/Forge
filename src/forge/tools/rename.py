@@ -18,12 +18,14 @@ edit is driven by the AST rather than by string matching.
 from __future__ import annotations
 
 import ast
+import re
+from pathlib import Path
 from typing import Any
 
 from forge.safety.guard import SafetyGuard
 from forge.tools.base import Tool, ToolResult
 from forge.tools.changes import ChangeLedger
-from forge.tools.filesystem import _write_exact
+from forge.tools.filesystem import _verify, _write_exact
 from forge.verify.ladder import Ladder
 
 _IDENTIFIER_OK = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_")
@@ -80,6 +82,11 @@ def occurrences(source: str, old: str) -> list[tuple[int, int, int]]:
             spots.append((node.end_lineno, end - len(old), end))
         elif isinstance(node, ast.arg) and node.arg == old:
             spots.append((node.lineno, node.col_offset, node.col_offset + len(old)))
+        elif isinstance(node, ast.ImportFrom):
+            # `from engine import calc` binds the name here too
+            for alias in node.names:
+                if alias.name == old and alias.asname is None:
+                    add_definition(node)
         elif isinstance(node, ast.keyword) and node.arg == old:
             continue  # a keyword argument belongs to the callee's signature
     return sorted(set(spots))
@@ -108,14 +115,108 @@ def apply_rename(source: str, old: str, new: str) -> tuple[str, int]:
     return "".join(lines), len(spots)
 
 
+_SKIP_DIRS = frozenset(
+    {".git", ".forge", ".venv", "venv", "node_modules", "__pycache__", "dist", "build"}
+)
+_MAX_SCANNED_FILES = 300
+
+
+def importers_of(workspace: Path, module: str) -> list[Path]:
+    """Repository files that import `module`, and so may reference the symbol.
+
+    A rename that stops at one file is not a rename: observed live, the model
+    correctly renamed `calc` in engine.py while cart.py and report.py kept
+    calling it, and nothing noticed because the structural check only inspects
+    files that were written to."""
+    found: list[Path] = []
+    scanned = 0
+    stack = [workspace]
+    while stack and scanned < _MAX_SCANNED_FILES:
+        current = stack.pop()
+        try:
+            entries = list(current.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.name in _SKIP_DIRS:
+                continue
+            if entry.is_dir():
+                stack.append(entry)
+                continue
+            if entry.suffix not in (".py", ".pyw"):
+                continue
+            scanned += 1
+            try:
+                text = entry.read_text(encoding="utf-8-sig", errors="replace")
+            except OSError:
+                continue
+            if re.search(rf"^\s*(?:import\s+{module}\b|from\s+{module}\s+import\b)",
+                         text, re.MULTILINE):
+                found.append(entry)
+    return sorted(found)
+
+
+def rename_module_references(source: str, module: str, old: str, new: str) -> tuple[str, int]:
+    """Rename `old` in a file that IMPORTS it, covering both shapes:
+    `from mod import old` / bare `old(...)`, and `mod.old(...)`."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return source, 0
+    lines = source.splitlines(keepends=True)
+    spots: list[tuple[int, int, int]] = []
+    imported_by_name = any(
+        isinstance(node, ast.ImportFrom)
+        and node.module == module
+        and any(a.name == old and a.asname is None for a in node.names)
+        for node in ast.walk(tree)
+    )
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == module:
+            for alias in node.names:
+                if alias.name == old and alias.asname is None:
+                    index = node.lineno - 1
+                    if index < len(lines):
+                        column = lines[index].find(old, node.col_offset)
+                        if column != -1:
+                            spots.append((node.lineno, column, column + len(old)))
+        elif (
+            isinstance(node, ast.Attribute)
+            and node.attr == old
+            and isinstance(node.value, ast.Name)
+            and node.value.id == module
+        ):
+            end = node.end_col_offset
+            spots.append((node.end_lineno, end - len(old), end))
+        elif imported_by_name and isinstance(node, ast.Name) and node.id == old:
+            spots.append((node.lineno, node.col_offset, node.end_col_offset))
+
+    if not spots:
+        return source, 0
+    by_line: dict[int, list[tuple[int, int]]] = {}
+    for line, start, end in sorted(set(spots)):
+        by_line.setdefault(line, []).append((start, end))
+    for line, spans in by_line.items():
+        index = line - 1
+        if index >= len(lines):
+            continue
+        text = lines[index]
+        for start, end in sorted(spans, reverse=True):
+            if text[start:end] == old:
+                text = text[:start] + new + text[end:]
+        lines[index] = text
+    return "".join(lines), len(set(spots))
+
+
 class RenameSymbolTool(Tool):
     name = "rename_symbol"
     mutating = True
     description = (
-        "Rename a function, class, method or variable throughout a Python "
-        "file, updating its definition AND every reference in one correct "
-        "operation. ALWAYS use this for a rename instead of edit_file — "
-        "edit_file matches text and will hit a call instead of the definition."
+        "Rename a function, class, method or variable: updates its definition, "
+        "every reference in that file, AND every other file in the repository "
+        "that imports it — one correct operation. ALWAYS use this for a rename "
+        "instead of edit_file, which matches text and will hit a call site "
+        "instead of the definition."
     )
     parameters: dict[str, Any] = {
         "type": "object",
@@ -179,8 +280,6 @@ class RenameSymbolTool(Tool):
                 "Check the spelling, or the file.",
             )
 
-        from forge.tools.filesystem import _verify
-
         refusal, advisory = _verify(
             self._ladder, self._syntax_gate, resolved, original, updated
         )
@@ -191,9 +290,40 @@ class RenameSymbolTool(Tool):
             )
         self._ledger.record_before_write(resolved)
         _write_exact(resolved, updated)
+
+        # A rename that stops at one file is not a rename. Propagate to every
+        # repository file that imports this module.
+        workspace = self._guard.workspace
+        module = resolved.stem
+        propagated: list[str] = []
+        for other in importers_of(workspace, module):
+            if other == resolved:
+                continue
+            try:
+                text = other.read_text(encoding="utf-8-sig", errors="replace")
+            except OSError:
+                continue
+            rewritten, hits = rename_module_references(text, module, old_name, new_name)
+            if not hits:
+                continue
+            refusal, _ = _verify(self._ladder, self._syntax_gate, other, text, rewritten)
+            if refusal:
+                continue  # never leave a dependent file worse than it was
+            self._ledger.record_before_write(other)
+            _write_exact(other, rewritten)
+            propagated.append(
+                str(other.relative_to(workspace)).replace("\\", "/")
+            )
+
+        also = (
+            f" Also updated {len(propagated)} importing file(s): "
+            + ", ".join(propagated)
+            if propagated
+            else ""
+        )
         return ToolResult(
             ok=True,
             output=f"Renamed {old_name} to {new_name} in {path} "
             f"({count} occurrence{'s' if count != 1 else ''}: the definition and "
-            f"every reference).{advisory}",
+            f"every reference).{also}{advisory}",
         )

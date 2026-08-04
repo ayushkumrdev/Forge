@@ -207,3 +207,75 @@ def test_a_rename_only_turn_is_not_bounced(workspace):
     reply = session.send("rename push to enqueue in q.py")
     assert reply == "Renamed push to enqueue."
     assert len(llm.requests) == 2  # accepted first time, no deflection nudge
+
+
+# -- cross-file propagation -------------------------------------------------------
+# Observed live on t3-rename-propagate: the model correctly renamed `calc` in
+# engine.py and the task still failed, because cart.py and report.py kept
+# calling it. Nothing noticed — the structural check only inspects files that
+# were written to. A rename that stops at one file is not a rename.
+
+
+def _repo_with_importers(root):
+    (root / "engine.py").write_text(
+        "def calc(items):\n    return sum(i['price'] for i in items)\n", encoding="utf-8"
+    )
+    (root / "cart.py").write_text(
+        "from engine import calc\n\n\ndef cart_total(c):\n    return calc(c)\n",
+        encoding="utf-8",
+    )
+    (root / "report.py").write_text(
+        "import engine\n\n\ndef summary(o):\n    return [engine.calc(x) for x in o]\n",
+        encoding="utf-8",
+    )
+    (root / "unrelated.py").write_text(
+        "def calc(x):\n    return x\n\n\ndef go():\n    return calc(1)\n", encoding="utf-8"
+    )
+
+
+def test_rename_propagates_to_importing_files(workspace):
+    _repo_with_importers(workspace)
+    result = _session(workspace).registry.execute(
+        "rename_symbol", {"path": "engine.py", "old_name": "calc", "new_name": "total"}
+    )
+    assert result.ok
+    assert "cart.py" in result.output and "report.py" in result.output
+    assert "from engine import total" in (workspace / "cart.py").read_text(encoding="utf-8")
+    assert "return total(c)" in (workspace / "cart.py").read_text(encoding="utf-8")
+    assert "engine.total(x)" in (workspace / "report.py").read_text(encoding="utf-8")
+
+
+def test_a_file_that_does_not_import_it_is_untouched(workspace):
+    """unrelated.py defines its own calc — same name, different function."""
+    _repo_with_importers(workspace)
+    _session(workspace).registry.execute(
+        "rename_symbol", {"path": "engine.py", "old_name": "calc", "new_name": "total"}
+    )
+    assert (workspace / "unrelated.py").read_text(encoding="utf-8") == (
+        "def calc(x):\n    return x\n\n\ndef go():\n    return calc(1)\n"
+    )
+
+
+def test_propagated_files_are_reversible(workspace):
+    _repo_with_importers(workspace)
+    before = (workspace / "cart.py").read_text(encoding="utf-8")
+    session = _session(workspace)
+    session.registry.execute(
+        "rename_symbol", {"path": "engine.py", "old_name": "calc", "new_name": "total"}
+    )
+    assert set(session.ledger.changed_files) >= {"engine.py", "cart.py", "report.py"}
+    session.undo()
+    assert (workspace / "cart.py").read_text(encoding="utf-8") == before
+
+
+def test_aliased_imports_are_left_alone(workspace):
+    """`from engine import calc as c` binds a different local name."""
+    (workspace / "engine.py").write_text("def calc(x):\n    return x\n", encoding="utf-8")
+    (workspace / "user.py").write_text(
+        "from engine import calc as c\n\n\ndef go():\n    return c(1)\n", encoding="utf-8"
+    )
+    _session(workspace).registry.execute(
+        "rename_symbol", {"path": "engine.py", "old_name": "calc", "new_name": "total"}
+    )
+    text = (workspace / "user.py").read_text(encoding="utf-8")
+    assert "return c(1)" in text  # the local alias still works
