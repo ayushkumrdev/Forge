@@ -4,7 +4,12 @@ and the resolution rung that catches hallucinated imports."""
 from pathlib import Path
 
 from forge.verify.ladder import RESOLUTION, SYNTAX, Ladder
-from forge.verify.resolution import public_names, resolution_errors
+from forge.verify.resolution import (
+    inconsistent_boolean_return_errors,
+    narrowed_signature_errors,
+    public_names,
+    resolution_errors,
+)
 
 # -- L2 resolution ---------------------------------------------------------------
 
@@ -733,3 +738,96 @@ def test_a_non_rename_problem_keeps_the_generic_remedy(tmp_path):
     )
     assert "copying old_string EXACTLY" in nudge
     assert "rename_symbol" not in nudge
+
+
+# -- narrowed signatures ----------------------------------------------------------
+# From a live failure: told to validate the address inside register(name,
+# email), the model shipped register(user). The task's change was made; every
+# caller broke. Nothing cheaper sees it — only a diff-aware check does.
+
+
+def test_narrowing_a_public_signature_is_reported():
+    before = "def register(name, email):\n    return (name, email)\n"
+    after = "def register(user):\n    return user\n"
+    problems = narrowed_signature_errors(before, after)
+    assert len(problems) == 1
+    assert "register()" in problems[0] and "2" in problems[0] and "1" in problems[0]
+
+
+def test_a_new_required_argument_is_reported():
+    before = "def send(msg):\n    return msg\n"
+    after = "def send(msg, channel):\n    return msg\n"
+    assert "every existing call breaks" in narrowed_signature_errors(before, after)[0]
+
+
+def test_widening_with_a_default_is_fine():
+    before = "def send(msg):\n    return msg\n"
+    after = "def send(msg, channel='general'):\n    return msg\n"
+    assert narrowed_signature_errors(before, after) == []
+
+
+def test_star_args_is_not_a_narrowing():
+    before = "def log(a, b):\n    return a\n"
+    after = "def log(*args):\n    return args\n"
+    assert narrowed_signature_errors(before, after) == []
+
+
+def test_methods_are_matched_by_qualified_name():
+    before = "class A:\n    def go(self, x):\n        return x\n"
+    after = "class A:\n    def go(self):\n        return 1\n"
+    assert "A.go()" in narrowed_signature_errors(before, after)[0]
+
+
+def test_private_helpers_are_left_alone():
+    before = "def _helper(a, b):\n    return a\n"
+    after = "def _helper(a):\n    return a\n"
+    assert narrowed_signature_errors(before, after) == []
+
+
+def test_a_removed_function_is_not_this_detector_s_job():
+    before = "def gone(a, b):\n    return a\n"
+    assert narrowed_signature_errors(before, "") == []
+
+
+def test_an_unrelated_edit_reports_nothing():
+    before = "def f(a, b):\n    return a\n"
+    after = "def f(a, b):\n    return a + b\n"
+    assert narrowed_signature_errors(before, after) == []
+
+
+# -- boolean returns --------------------------------------------------------------
+
+
+def test_a_predicate_returning_a_bare_and_is_reported():
+    source = (
+        "def validate_email(address):\n"
+        "    parts = address.split('@')\n"
+        "    if len(parts) != 2:\n"
+        "        return False\n"
+        "    local, domain = parts\n"
+        "    return local and domain and '.' in domain\n"
+    )
+    problems = inconsistent_boolean_return_errors(source)
+    assert len(problems) == 1
+    assert "validate_email()" in problems[0] and "bool(...)" in problems[0]
+
+
+def test_wrapping_in_bool_is_accepted():
+    source = (
+        "def ok(a):\n"
+        "    if not a:\n"
+        "        return False\n"
+        "    return bool(a and len(a) > 2)\n"
+    )
+    assert inconsistent_boolean_return_errors(source) == []
+
+
+def test_a_comparison_return_is_accepted():
+    source = "def ok(a):\n    if not a:\n        return False\n    return len(a) > 2\n"
+    assert inconsistent_boolean_return_errors(source) == []
+
+
+def test_a_function_that_never_returns_a_literal_bool_is_left_alone():
+    """`a or default` is a legitimate idiom when the function is not a predicate."""
+    source = "def pick(a, b):\n    return a or b\n"
+    assert inconsistent_boolean_return_errors(source) == []

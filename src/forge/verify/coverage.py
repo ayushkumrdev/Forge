@@ -234,6 +234,81 @@ def assess(
         return CoverageVerdict()
 
 
+# requirements that describe a boolean-returning predicate, and ones that
+# describe changing the INSIDE of a function that already exists
+_PREDICATE_RE = re.compile(
+    r"\breturns?\s+(?:only\s+)?(?:true|false)\b"
+    r"|\breturns?\s+a\s+bool", re.IGNORECASE
+)
+_SIGNATURE_RE = re.compile(r"\b(?:raise|reject|validate|check|guard)\w*\b", re.IGNORECASE)
+# ... unless the user is actually asking for the signature to change
+_SIGNATURE_EXEMPT_RE = re.compile(
+    r"\b(?:parameter|argument|signature|accepts?|takes?)\b", re.IGNORECASE
+)
+
+# "push is renamed to enqueue" / "rename `push` to `enqueue`" / "rename the
+# pop method to dequeue". Both orderings the decomposer actually produces.
+_RENAME_SHAPES = (
+    re.compile(r"\b(\w+)\s+(?:is|are|should be|must be|gets?|needs? to be)\s+renamed\s+to\s+(\w+)"),
+    re.compile(r"\brenam\w*\s+(?:the\s+)?(\w+)\s+(?:\w+\s+)?to\s+(\w+)"),
+)
+
+
+def rename_pair(text: str) -> tuple[str, str] | None:
+    """Extract (old, new) if this requirement is a rename, else None."""
+    if "renam" not in text.lower():
+        return None
+    plain = text.replace("`", "").replace("'", "").replace('"', "")
+    for shape in _RENAME_SHAPES:
+        match = shape.search(plain)
+        if match and match.group(1) != match.group(2):
+            return match.group(1), match.group(2)
+    return None
+
+
+def _how_to_do_it(requirement: Requirement) -> str:
+    """Tool guidance shaped by what the requirement actually asks for.
+
+    This used to be one fixed line naming edit_file and append_to_file, which
+    quietly sabotaged every rename: it is the last and most specific thing the
+    model reads, so it overrode the system prompt's 'always use rename_symbol'
+    and sent the model hand-editing text. Renaming `pop` by text search hits
+    `self._items.pop(0)` — a list method that must not change — and misses
+    `self.pop()` inside other methods."""
+    pair = rename_pair(requirement.text)
+    if pair is not None:
+        old, new = pair
+        return (
+            "Use the rename_symbol tool for this — one call renames the "
+            "definition and every reference to it, and it will not touch "
+            "unrelated methods that happen to share the name. Call it as "
+            f'{{"path": "<file>", "old_name": "{old}", "new_name": "{new}"}}. '
+            "Do NOT hand-edit the file with edit_file or write_file: text "
+            "matching hits the wrong occurrences."
+        )
+    how = (
+        "Read the file first, then make the change with append_to_file (to "
+        "add something new), edit_file (to change existing text), or "
+        "rename_symbol (to rename something)."
+    )
+    if _PREDICATE_RE.search(requirement.text):
+        # `return local and domain` evaluates to '' for an empty local part,
+        # not to False — the single most common way this comes out wrong
+        how += (
+            " This returns a boolean, so every return must be an actual True "
+            "or False: wrap a combined condition in bool(...), because "
+            "'a and b' evaluates to one of the operands, not to a boolean."
+        )
+    if _SIGNATURE_RE.search(requirement.text) and not _SIGNATURE_EXEMPT_RE.search(
+        requirement.text
+    ):
+        how += (
+            " Keep the existing function signature exactly as it is — callers "
+            "elsewhere depend on it. Change the body, not the parameters."
+        )
+    return how
+
+
 def focused_prompt(requirement: Requirement, done: list[Requirement]) -> str:
     """A single requirement, stated on its own with a clean slate.
 
@@ -252,9 +327,8 @@ def focused_prompt(requirement: Requirement, done: list[Requirement]) -> str:
     return (
         f"Do exactly this one thing, nothing else:\n\n{requirement.text}"
         f"{context}\n\n"
-        "Read the file first, then make the change with append_to_file (to add "
-        "something new) or edit_file (to change existing text). Reply in plain "
-        "text only when the change is in the file."
+        f"{_how_to_do_it(requirement)} Reply in plain text only when the "
+        "change is in the file."
     )
 
 

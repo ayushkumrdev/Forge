@@ -224,7 +224,10 @@ def test_approval_allow_always_skips_next_prompt(workspace):
     )
     client = _client(workspace, factory)
     client.post("/api/chat/start", json={"mode": "ask"})
-    client.post("/api/chat/message", json={"text": "write both"})
+    # phrased as one outcome on purpose: this test is about the approval
+    # flow, and "write both" now reads as multi-part, which engages
+    # plan-first decomposition and changes the call sequence
+    client.post("/api/chat/message", json={"text": "write the files"})
     _wait(client, lambda s: s["pending_approval"])
     client.post("/api/chat/approval", json={"approved": True, "always": True})
     _wait_idle(client)

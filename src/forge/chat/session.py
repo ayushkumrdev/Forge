@@ -60,6 +60,8 @@ from forge.verify.ladder import Ladder
 from forge.verify.resolution import (
     broken_method_signature_errors,
     dangling_reference_errors,
+    inconsistent_boolean_return_errors,
+    narrowed_signature_errors,
     undefined_self_call_errors,
 )
 from forge.verify.search import _search_temperatures, search
@@ -468,6 +470,49 @@ class ChatSession:
         self.recorder.event(
             "chat", "turn_started", action_turn=action_turn, effort=self.effort
         )
+
+        # Plan-first execution. A multi-part request attempted in one go is
+        # where this model reliably comes apart: it does the first part,
+        # botches the second, and every later step works from a context full
+        # of its own half-finished edits. The focused pass — one requirement,
+        # clean slate — already demonstrably works, but until now it only ran
+        # as REPAIR, after the damage. Doing it up front is the same mechanism
+        # applied before the mess instead of after it.
+        if (
+            action_turn
+            and self.settings.gate_plan_first
+            and self.effort != "fast"
+            and looks_multi_requirement(user_text)
+        ):
+            requirements = decompose(self._thinker or self.llm, user_text, self.usage)
+            if len(requirements) > 1:
+                self.recorder.event(
+                    "chat", "plan_first", count=len(requirements),
+                    output="; ".join(r.text for r in requirements)[:400],
+                )
+                done: list[Requirement] = []
+                for requirement in requirements:
+                    if self._cancelled():
+                        break
+                    # extra compute, if the user is paying for it, goes into
+                    # each step rather than into one big attempt
+                    changed = (
+                        self._search_requirement(requirement, done)
+                        if self.settings.search_candidates > 1
+                        else self._focused_pass(requirement, done)
+                    )
+                    if changed:
+                        turn_mutated = True
+                    done.append(requirement)
+                self.history.append(
+                    ChatMessage(
+                        role="user",
+                        content="Each part of that request was carried out in a "
+                        "separate focused step. Check the result is complete and "
+                        "consistent, fix anything still wrong, then summarize "
+                        "what changed in plain text.",
+                    )
+                )
         deadline = (
             time.monotonic() + self.settings.max_turn_seconds
             if self.settings.max_turn_seconds > 0
@@ -655,7 +700,10 @@ class ChatSession:
                             )
                             if self.settings.search_candidates > 1:
                                 for requirement in missing:
-                                    self._search_requirement(requirement, requirements)
+                                    self._search_requirement(
+                                        requirement,
+                                        [r for r in requirements if r is not requirement],
+                                    )
                                 self.history.append(
                                     ChatMessage(
                                         role="user",
@@ -820,9 +868,14 @@ class ChatSession:
                 continue
             name = path.name
             issues = dangling_reference_errors(original, current)
+            issues += narrowed_signature_errors(original, current)
             # only NEW self-call breakage counts; a pre-existing one is not
             # this change's fault and must never trap the agent
-            for detector in (undefined_self_call_errors, broken_method_signature_errors):
+            for detector in (
+                undefined_self_call_errors,
+                broken_method_signature_errors,
+                inconsistent_boolean_return_errors,
+            ):
                 before = {self._issue_without_line(b) for b in detector(original)}
                 issues += [
                     issue
@@ -833,12 +886,16 @@ class ChatSession:
         return problems[:4]
 
     def _search_requirement(
-        self, requirement: Requirement, all_requirements: list[Requirement]
+        self, requirement: Requirement, done: list[Requirement]
     ) -> bool:
         """Best-of-N for one requirement: several attempts at different
         temperatures, each in isolation, keeping whichever actually did the
-        job. This is where extra compute substitutes for a bigger model."""
-        done = [r for r in all_requirements if r is not requirement]
+        job. This is where extra compute substitutes for a bigger model.
+
+        `done` is what has genuinely been handled already — the caller decides,
+        because it means different things in the two callers: on the repair
+        path everything else is finished, while under plan-first only the
+        earlier requirements are."""
         judge = self._thinker or self.llm
 
         def attempt(index: int, temperature: float | None) -> tuple[bool, bool]:

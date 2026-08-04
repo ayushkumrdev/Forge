@@ -15,7 +15,9 @@ from forge.verify.coverage import (
     build_evidence,
     coverage_nudge,
     decompose,
+    focused_prompt,
     looks_multi_requirement,
+    rename_pair,
 )
 
 # -- the cheap pre-filter ---------------------------------------------------------
@@ -163,7 +165,7 @@ def test_turn_cannot_end_while_a_requirement_is_missing(workspace):
         )),
     ])
     # this test covers the in-place nudge path; the focused path has its own
-    settings = ForgeSettings(gate_focused_retry=False)
+    settings = ForgeSettings(gate_focused_retry=False, gate_plan_first=False)
     session = ChatSession(workspace, llm, settings, session_id="cov")
     reply = session.send("add apply_discount to prices.py and use it in checkout")
 
@@ -186,7 +188,7 @@ def test_gate_accepts_when_everything_is_covered(workspace):
             ' {"id": 2, "met": true, "reason": "diff"}]}'
         )),
     ])
-    session = ChatSession(workspace, llm, ForgeSettings(), session_id="cov2")
+    session = ChatSession(workspace, llm, ForgeSettings(gate_plan_first=False), session_id="cov2")
     reply = session.send("set x to 2 in m.py and also add y = 3")
     assert reply == "Set x and added y."
 
@@ -198,7 +200,7 @@ def test_gate_can_be_ablated(workspace):
             name="write_file", arguments={"path": "m.py", "content": "x = 2\n"})]),
         ChatMessage(role="assistant", content="Half done."),
     ])
-    settings = ForgeSettings(gate_coverage=False)
+    settings = ForgeSettings(gate_coverage=False, gate_plan_first=False)
     session = ChatSession(workspace, llm, settings, session_id="cov3")
     assert session.send("set x to 2 and also add y") == "Half done."
     assert len(llm.requests) == 2  # no decompose, no assess
@@ -235,7 +237,7 @@ def test_coverage_is_bounded(workspace):
         stubborn, unmet,
         stubborn,
     ])
-    settings = ForgeSettings(gate_focused_retry=False)
+    settings = ForgeSettings(gate_focused_retry=False, gate_plan_first=False)
     session = ChatSession(workspace, llm, settings, session_id="cov5")
     assert session.send("set x to 2 and also add y") == "Half done."
     gaps = [m for m in session.history if "does not yet cover" in m.content]
@@ -355,7 +357,7 @@ def test_focused_retry_can_be_ablated(workspace):
             ' {"id": 2, "met": false, "reason": "no"}]}')),
         ChatMessage(role="assistant", content="Still one."),
     ])
-    settings = ForgeSettings(gate_focused_retry=False)
+    settings = ForgeSettings(gate_focused_retry=False, gate_plan_first=False)
     session = ChatSession(workspace, llm, settings, session_id="foc2")
     session.send("set x to 2 and also add y")
     assert not any("Do exactly this one thing" in m.content for m in session.history)
@@ -381,7 +383,7 @@ def test_focused_pass_failure_does_not_break_the_turn(workspace):
             ' {"id": 2, "met": false, "reason": "no"}]}')),
         ChatMessage(role="assistant", content="Summary after the failed pass."),
     ])
-    session = ChatSession(workspace, llm, ForgeSettings(), session_id="foc3")
+    session = ChatSession(workspace, llm, ForgeSettings(gate_plan_first=False), session_id="foc3")
     assert session.send("set x to 2 and also add y") == "Summary after the failed pass."
 
 
@@ -529,6 +531,150 @@ def test_gate_catches_the_half_finished_cross_file_change(workspace):
         ChatMessage(role="assistant", content="Wired it into register."),
         ChatMessage(role="assistant", content="Both parts done."),
     ])
-    session = ChatSession(workspace, llm, ForgeSettings(), session_id="mech")
+    session = ChatSession(workspace, llm, ForgeSettings(gate_plan_first=False), session_id="mech")
     session.send("add validate_email to validators.py and use it in signup.py register()")
     assert "raise ValueError" in (workspace / "signup.py").read_text(encoding="utf-8")
+
+
+# -- plan-first execution ---------------------------------------------------------
+# A multi-part request attempted in one go is where this model comes apart:
+# it does part one, botches part two, and every later step works from a
+# context full of its own half-finished edits. The focused pass already
+# worked — but only as REPAIR, after the damage. Plan-first runs the same
+# mechanism BEFORE the mess.
+
+
+def test_each_requirement_runs_in_its_own_focused_step(workspace):
+    (workspace / "q.py").write_text("class Q:\n    def push(self, i):\n        pass\n", "utf-8")
+    llm = MockLLMClient([
+        # decomposition happens FIRST, before any attempt
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "push is renamed to enqueue"},'
+            ' {"id": 2, "text": "pop is renamed to dequeue"}]}'
+        )),
+        # focused step 1
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "q.py",
+                       "content": "class Q:\n    def enqueue(self, i):\n        pass\n"})]),
+        ChatMessage(role="assistant", content="Renamed push."),
+        # focused step 2
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "q.py",
+                       "content": "class Q:\n    def enqueue(self, i):\n        pass\n\n"
+                                  "    def dequeue(self):\n        pass\n"})]),
+        ChatMessage(role="assistant", content="Renamed pop."),
+        # the main loop then reviews and summarizes
+        ChatMessage(role="assistant", content="Both renames are done."),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": true, "reason": "d"}]}'
+        )),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="pf")
+    session.send("rename push to enqueue and rename pop to dequeue")
+    text = (workspace / "q.py").read_text(encoding="utf-8")
+    assert "def enqueue" in text and "def dequeue" in text
+    # a pass STARTS with exactly [system, focused prompt] — nothing else in
+    # front of the model, which is the entire point of the mechanism
+    starts = [
+        req for req in llm.requests
+        if len(req) == 2 and "Do exactly this one thing" in req[-1].content
+    ]
+    assert len(starts) == 2  # one clean step per requirement
+    assert "enqueue" in starts[0][-1].content
+    assert "dequeue" in starts[1][-1].content
+
+
+def test_plan_first_is_skipped_for_a_single_outcome_request(workspace):
+    (workspace / "m.py").write_text("x = 1\n", encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "m.py", "content": "x = 2\n"})]),
+        ChatMessage(role="assistant", content="Done."),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="pf2")
+    assert session.send("fix the value of x in m.py") == "Done."
+    assert len(llm.requests) == 2  # no decomposition, no focused steps
+
+
+def test_plan_first_can_be_ablated(workspace):
+    (workspace / "m.py").write_text("x = 1\n", encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "m.py", "content": "x = 2\ny = 3\n"})]),
+        ChatMessage(role="assistant", content="Did both."),
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "x"}, {"id": 2, "text": "y"}]}')),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": true, "reason": "d"}]}')),
+    ])
+    settings = ForgeSettings(gate_plan_first=False)
+    session = ChatSession(workspace, llm, settings, session_id="pf3")
+    session.send("set x to 2 and also add y")
+    assert not any("Do exactly this one thing" in m.content for m in session.history)
+
+
+def test_a_broken_decomposition_falls_back_to_one_attempt(workspace):
+    (workspace / "m.py").write_text("x = 1\n", encoding="utf-8")
+    llm = MockLLMClient(
+        [ChatMessage(role="assistant", content="not json")] * 3
+        + [
+            ChatMessage(role="assistant", tool_calls=[ToolCall(
+                name="write_file", arguments={"path": "m.py", "content": "x = 2\ny = 3\n"})]),
+            ChatMessage(role="assistant", content="Did both."),
+        ]
+    )
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="pf4")
+    assert session.send("set x to 2 and also add y") == "Did both."
+
+
+# -- requirement-shaped tool guidance ---------------------------------------------
+
+
+def test_a_rename_requirement_is_pointed_at_rename_symbol():
+    req = Requirement(id=1, text="push is renamed to enqueue, including every call to it")
+    prompt = focused_prompt(req, [])
+    assert "rename_symbol" in prompt
+    assert '"old_name": "push"' in prompt and '"new_name": "enqueue"' in prompt
+    # the old fixed guidance actively steered renames into hand-editing
+    assert "make the change with append_to_file" not in prompt
+
+
+def test_rename_pair_reads_both_phrasings():
+    assert rename_pair("rename `push` to `enqueue`") == ("push", "enqueue")
+    assert rename_pair("pop is renamed to dequeue") == ("pop", "dequeue")
+    assert rename_pair("rename the pop method to dequeue") == ("pop", "dequeue")
+    assert rename_pair("add a validate_email helper") is None
+    assert rename_pair("keep the renamed function documented") is None
+
+
+def test_non_rename_requirements_still_get_the_general_guidance():
+    req = Requirement(id=1, text="validate_email is used in signup.register")
+    prompt = focused_prompt(req, [])
+    assert "append_to_file" in prompt and "edit_file" in prompt
+
+
+def test_a_predicate_requirement_warns_about_and_returning_an_operand():
+    req = Requirement(
+        id=1,
+        text="validate_email(address) returns True only when there is exactly one '@'",
+    )
+    prompt = focused_prompt(req, [])
+    assert "bool(...)" in prompt
+
+
+def test_a_behaviour_change_requirement_warns_against_touching_the_signature():
+    req = Requirement(
+        id=2,
+        text="register() raises ValueError('invalid email') for a bad address",
+    )
+    assert "Keep the existing function signature" in focused_prompt(req, [])
+
+
+def test_a_requirement_that_asks_for_a_new_argument_is_exempt():
+    """The warning must not fight a signature change the user asked for."""
+    req = Requirement(id=3, text="register() takes a new strict argument that validates input")
+    assert "Keep the existing function signature" not in focused_prompt(req, [])

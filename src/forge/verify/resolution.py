@@ -307,6 +307,122 @@ def dangling_reference_errors(original: str, new_content: str) -> list[str]:
     ]
 
 
+_INFINITE = float("inf")
+
+
+def _arity(node: ast.FunctionDef | ast.AsyncFunctionDef) -> tuple[int, float]:
+    """(minimum, maximum) positional arguments this definition accepts."""
+    args = node.args
+    positional = [*args.posonlyargs, *args.args]
+    minimum = len(positional) - len(args.defaults)
+    maximum = _INFINITE if args.vararg is not None else float(len(positional))
+    # a keyword-only argument with no default is required at every call site
+    minimum += sum(1 for default in args.kw_defaults if default is None)
+    return minimum, maximum
+
+
+def _signatures(source: str) -> dict[str, tuple[int, float, int]]:
+    """Qualified function name -> (min args, max args, line)."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return {}
+    found: dict[str, tuple[int, float, int]] = {}
+
+    def walk(node: ast.AST, prefix: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.ClassDef):
+                walk(child, f"{prefix}{child.name}.")
+            elif isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef):
+                minimum, maximum = _arity(child)
+                found[f"{prefix}{child.name}"] = (minimum, maximum, child.lineno)
+                walk(child, f"{prefix}{child.name}.")
+
+    walk(tree, "")
+    return found
+
+
+def _describe(count: float) -> str:
+    return "any number of" if count == _INFINITE else str(int(count))
+
+
+def narrowed_signature_errors(original: str, new_content: str) -> list[str]:
+    """A public function that no longer accepts the calls it used to.
+
+    Observed live: asked to validate the address inside `register(name,
+    email)`, the model rewrote it as `register(user)` — the change it was
+    asked for was made, and every existing caller broke silently. Nothing
+    cheaper catches this: the file parses, the imports resolve, and the
+    signature is internally consistent. It is only wrong relative to what was
+    there before, which is exactly what a diff-aware check can see.
+
+    Narrowing only. Widening a signature (a new argument with a default) keeps
+    every existing call valid, so it is never reported."""
+    old_defs = _signatures(original)
+    if not old_defs:
+        return []
+    new_defs = _signatures(new_content)
+    problems: list[str] = []
+    for qualname, (old_min, old_max, _) in old_defs.items():
+        if qualname.rpartition(".")[2].startswith("_"):
+            continue  # private helper: callers are all in this repo's control
+        current = new_defs.get(qualname)
+        if current is None:
+            continue  # removed or renamed — dangling_reference_errors owns that
+        new_min, new_max, line = current
+        if new_max < old_max:
+            problems.append(
+                f"line {line}: '{qualname}()' used to accept {_describe(old_max)} "
+                f"positional arguments and now accepts {_describe(new_max)}; every "
+                f"existing call passing more than that breaks"
+            )
+        elif new_min > old_min:
+            problems.append(
+                f"line {line}: '{qualname}()' now requires {_describe(new_min)} "
+                f"arguments where {_describe(old_min)} used to be enough; every "
+                f"existing call breaks"
+            )
+    return problems
+
+
+def inconsistent_boolean_return_errors(source: str) -> list[str]:
+    """A predicate that returns `a and b` instead of a real boolean.
+
+    Observed live: `validate_email('@b.com')` returned `''` rather than
+    False, because `and` evaluates to one of its operands, not to a boolean.
+    The check is narrow on purpose — it only fires when the same function
+    also returns a literal True or False somewhere, which is the function
+    itself declaring that it deals in booleans."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    problems: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        returns = [
+            child
+            for child in ast.walk(node)
+            if isinstance(child, ast.Return) and child.value is not None
+        ]
+        literal = any(
+            isinstance(r.value, ast.Constant) and isinstance(r.value.value, bool)
+            for r in returns
+        )
+        if not literal:
+            continue
+        problems += [
+            f"line {r.lineno}: '{node.name}()' returns True or False elsewhere but "
+            f"returns a bare 'and'/'or' expression here, which evaluates to one of "
+            f"the operands (for example '' or None) rather than a boolean — wrap it "
+            f"in bool(...)"
+            for r in returns
+            if isinstance(r.value, ast.BoolOp)
+        ]
+    return problems
+
+
 def resolution_errors(
     file_path: Path, source: str, workspace: Path, max_reported: int = 4
 ) -> list[str]:

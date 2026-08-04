@@ -40,6 +40,7 @@ ABLATIONS: dict[str, dict[str, bool]] = {
     "no-preflight": {"gate_preflight": False},
     "no-resolution": {"gate_resolution": False},
     "no-coverage": {"gate_coverage": False},
+    "no-plan-first": {"gate_plan_first": False},
     "no-focused-retry": {"gate_focused_retry": False},
     "search-3": {"search_candidates": 3},
     "no-gates": {
@@ -52,6 +53,7 @@ ABLATIONS: dict[str, dict[str, bool]] = {
         "gate_resolution": False,
         "gate_coverage": False,
         "gate_focused_retry": False,
+        "gate_plan_first": False,
     },
 }
 
@@ -211,6 +213,7 @@ def run_suite(
                 "constrained_retry": run_settings.gate_constrained_retry,
                 "resolution": run_settings.gate_resolution,
                 "coverage": run_settings.gate_coverage,
+                "plan_first": run_settings.gate_plan_first,
                 "search_candidates": run_settings.search_candidates,
             },
         }

@@ -70,6 +70,10 @@ class ForgeSettings(BaseSettings):
     # actually satisfied it. 1 disables (a single attempt). This is test-time
     # compute — the lever available when the model cannot be made larger.
     search_candidates: int = 1
+    # Plan-first: on a multi-part request, decompose up front and carry out
+    # each requirement in its own focused step, instead of one big attempt
+    # that half-succeeds and then works from its own mess.
+    gate_plan_first: bool = True
 
     # Repository scanning
     max_tree_entries: int = 400
