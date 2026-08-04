@@ -10,7 +10,8 @@ def _user_content(request: list[ChatMessage]) -> str:
     return next(m.content for m in request if m.role == "user")
 
 
-def test_thinker_brief_reaches_the_coder(workspace):
+def test_thinker_brief_reaches_the_coder(workspace, monkeypatch):
+    monkeypatch.setenv("FORGE_GATE_INTENT_BRIEF", "1")  # this test IS about briefing
     thinker = MockLLMClient(
         [
             ChatMessage(

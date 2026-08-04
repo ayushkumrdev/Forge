@@ -305,7 +305,19 @@
   .step-mark {
     font-size: 12.5px; color: var(--ink-dim); margin: 2px 0 12px;
     padding-left: 13px; border-left: 2px solid var(--accent);
+    position: relative; transition: color .2s, border-color .2s;
   }
+  .step-mark[data-live] { border-left-color: var(--accent); }
+  .step-mark[data-live]::after {
+    content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 8px;
+    border-radius: 50%; background: var(--accent); animation: pulse 1.1s ease-in-out infinite;
+  }
+  /* a finished plan should read as a checklist, not a run of identical lines */
+  .step-mark.step-done { border-left-color: var(--ok); color: var(--dim); }
+  .step-mark.step-done::after { content: " ✓"; color: var(--ok); margin-left: 7px; }
+  .step-mark.step-empty { border-left-color: var(--warn); color: var(--dim); }
+  .step-mark.step-empty::after { content: " changed nothing"; color: var(--warn); font-size: 11px; margin-left: 7px; }
+  @keyframes pulse { 0%,100% { opacity: .25; } 50% { opacity: 1; } }
   /* reasoning / chain of thought */
   .think {
     border: 1px solid var(--line-soft); border-radius: var(--r-sm);
@@ -887,7 +899,18 @@ function addToolEvents(events) {
     }
     if (e.kind === "focused_pass") {
       $("#lane").insertAdjacentHTML("beforeend",
-        `<div class="step-mark">${esc(e.output || "")}</div>`);
+        `<div class="step-mark" data-live="1">${esc(e.output || "")}</div>`);
+      continue;
+    }
+    if (e.kind === "focused_pass_done") {
+      // close the step off, so a finished plan reads as a checklist rather
+      // than an undifferentiated run of lines
+      const marks = document.querySelectorAll("#lane .step-mark[data-live]");
+      const mark = marks[marks.length - 1];
+      if (mark) {
+        mark.removeAttribute("data-live");
+        mark.classList.add(e.ok ? "step-done" : "step-empty");
+      }
       continue;
     }
     if (e.kind === "honesty_violation") {
@@ -986,7 +1009,8 @@ async function poll(gen, fast) {
     const toolEvents = st.events.filter(e =>
       e.kind === "tool_call" || e.kind === "tool_result" ||
       e.kind === "intent_brief" || e.kind === "honesty_violation" ||
-      e.kind === "plan_first" || e.kind === "focused_pass");
+      e.kind === "plan_first" || e.kind === "focused_pass" ||
+      e.kind === "focused_pass_done");
     if (toolEvents.length) { setPartial(""); addToolEvents(toolEvents); }
     S.evtSeen = st.event_count;
 

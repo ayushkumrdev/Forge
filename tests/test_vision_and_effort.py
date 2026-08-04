@@ -95,7 +95,8 @@ def test_fast_skips_thinker_and_shrinks_budget(workspace):
     assert session._step_budget() < settings.max_agent_steps
 
 
-def test_genius_self_briefs_without_a_thinker(workspace):
+def test_genius_self_briefs_without_a_thinker(workspace, monkeypatch):
+    monkeypatch.setenv("FORGE_GATE_INTENT_BRIEF", "1")  # this test IS about briefing
     coder = MockLLMClient(
         [
             ChatMessage(role="assistant", content="INTENT: add helper. STEPS: ..."),
@@ -143,3 +144,101 @@ def test_api_start_and_switch_effort(workspace):
     state = client.post("/api/chat/effort", json={"effort": "fast"}).json()
     assert state["effort"] == "fast"
     assert client.post("/api/chat/effort", json={"effort": "warp"}).status_code == 422
+
+
+# -- effort levels must change what actually happens ------------------------------
+# "Genius" used to mean a larger step budget and one extra re-read. The lever
+# that actually buys capability on fixed hardware — several verified attempts
+# per requirement — sat behind a setting that defaults to off, so the highest
+# effort level never used it.
+
+
+def test_genius_spends_real_compute_where_the_others_do_not(workspace):
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.mock import MockLLMClient
+
+    levels = {}
+    for effort in ("fast", "smart", "genius"):
+        session = ChatSession(
+            workspace, MockLLMClient([]), ForgeSettings(effort=effort), session_id=effort
+        )
+        levels[effort] = (
+            session._candidates(), session._focused_budget(), session._repair_passes()
+        )
+
+    assert levels["fast"] == levels["smart"], "fast and smart differ by step budget"
+    candidates, focused, repairs = levels["genius"]
+    assert candidates > levels["smart"][0]
+    assert focused > levels["smart"][1]
+    assert repairs > levels["smart"][2]
+
+
+def test_an_explicit_candidate_setting_always_wins(workspace):
+    """A user who asked for 5 attempts gets 5, whatever the effort level."""
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.mock import MockLLMClient
+
+    for effort in ("fast", "smart", "genius"):
+        session = ChatSession(
+            workspace,
+            MockLLMClient([]),
+            ForgeSettings(effort=effort, search_candidates=5),
+            session_id=f"x{effort}",
+        )
+        assert session._candidates() == 5
+
+
+def test_the_turn_records_what_the_effort_level_bought(workspace):
+    """An effort level nobody can observe is a label, not a feature."""
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage
+    from forge.llm.mock import MockLLMClient
+    from forge.telemetry import Recorder
+
+    llm = MockLLMClient([ChatMessage(role="assistant", content="Done.")] * 4)
+    events = []
+    recorder = Recorder("rec", workspace, console=None, sink=events.append)
+    session = ChatSession(
+        workspace, llm, ForgeSettings(effort="genius"),
+        recorder=recorder, session_id="rec",
+    )
+    session.send("what does this repo do")
+    started = [e for e in events if e.get("kind") == "turn_started"]
+    assert started and "candidates=3" in started[0]["output"]
+
+
+def test_smart_reasons_before_changing_code(workspace, monkeypatch):
+    """The default setup — one model, smart effort — used to do no reasoning
+    at all and go straight to a tool call."""
+    monkeypatch.setenv("FORGE_GATE_INTENT_BRIEF", "1")
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage, ToolCall
+    from forge.llm.mock import MockLLMClient
+
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content="INTENT: set x to 2 in m.py."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "m.py", "content": "x = 2\n"})]),
+        ChatMessage(role="assistant", content="Set x to 2."),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(effort="smart"), session_id="sb")
+    session.send("set x to 2 in m.py")
+    assert any("Intent brief" in m.content for m in session.history)
+
+
+def test_a_question_does_not_pay_for_a_plan(workspace, monkeypatch):
+    """Reason before CHANGING something; answer a question immediately."""
+    monkeypatch.setenv("FORGE_GATE_INTENT_BRIEF", "1")
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage
+    from forge.llm.mock import MockLLMClient
+
+    llm = MockLLMClient([ChatMessage(role="assistant", content="It is a task queue.")])
+    session = ChatSession(workspace, llm, ForgeSettings(effort="smart"), session_id="q")
+    assert session.send("what does taskqueue.py do?") == "It is a task queue."
+    assert len(llm.requests) == 1  # no brief, no extra call

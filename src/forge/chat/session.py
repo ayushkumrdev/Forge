@@ -468,7 +468,9 @@ class ChatSession:
             context = self._engine.preflight(user_text)
             if context:
                 expanded += "\n\n" + context
-        brief = self._interpret(user_text)
+        # arm the act-don't-tell gate when this turn asks for a change
+        action_turn = is_action_request(user_text)
+        brief = self._interpret(user_text, action_turn)
         if brief:
             expanded += (
                 "\n\n## Intent brief (a reasoning model interpreted the request"
@@ -476,9 +478,6 @@ class ChatSession:
             )
         self.history.append(ChatMessage(role="user", content=expanded))
         self._maybe_compact()
-
-        # arm the act-don't-tell gate when this turn asks for a change
-        action_turn = is_action_request(user_text)
         turn_mutated = False
         turn_ran_command = False
         last_write_failure = ""
@@ -490,8 +489,15 @@ class ChatSession:
         requirements: list[Requirement] | None = None
         commands_run: list[str] = []
         # the evaluation harness reconstructs per-turn behaviour from the trace
+        # the effort level is only meaningful if it changes what actually
+        # happens, so record the levers it set rather than just its name
         self.recorder.event(
-            "chat", "turn_started", action_turn=action_turn, effort=self.effort
+            "chat", "turn_started", action_turn=action_turn, effort=self.effort,
+            count=self._candidates(),
+            output=(
+                f"steps<={self._step_budget()} candidates={self._candidates()} "
+                f"focused<={self._focused_budget()} repairs<={self._repair_passes()}"
+            ),
         )
         # computed BEFORE plan-first: the planning phase does real model work
         # and must live inside the turn's time budget like everything else
@@ -529,7 +535,7 @@ class ChatSession:
                         break
                     # extra compute, if the user is paying for it, goes into
                     # each step rather than into one big attempt
-                    if self.settings.search_candidates > 1:
+                    if self._candidates() > 1:
                         changed = self._search_requirement(requirement, done)
                     else:
                         # Judge the step by whether IT changed anything —
@@ -688,7 +694,7 @@ class ChatSession:
                 # the model fixed the missed caller and left a method without
                 # its `self`). Bounded so a model that cannot fix it still
                 # ends the turn.
-                if turn_mutated and dangling_passes < _MAX_STRUCTURAL_PASSES:
+                if turn_mutated and dangling_passes < self._repair_passes():
                     stale = self._dangling_references()
                     if stale:
                         dangling_passes += 1
@@ -736,7 +742,7 @@ class ChatSession:
                     and action_turn
                     and turn_mutated
                     and self.effort != "fast"
-                    and coverage_passes < _MAX_COVERAGE_PASSES
+                    and coverage_passes < self._repair_passes()
                     and looks_multi_requirement(user_text)
                 ):
                     if requirements is None:
@@ -778,7 +784,7 @@ class ChatSession:
                             self.history.append(
                                 message.model_copy(update={"content": content})
                             )
-                            if self.settings.search_candidates > 1:
+                            if self._candidates() > 1:
                                 for requirement in missing:
                                     self._search_requirement(
                                         requirement,
@@ -880,6 +886,31 @@ class ChatSession:
         if self.effort == "genius":
             return int(base * 1.5)
         return base
+
+    # Genius is meant to be "spend more compute", and until now it spent
+    # almost none: a larger step budget and one extra re-read. The lever that
+    # actually buys capability on fixed hardware — several attempts at a
+    # requirement, each verified, keeping whichever really did the job — was
+    # built, measured (0/3 -> 2/3 on t2-three-guards), and then left behind a
+    # setting that defaults to off, so the highest effort level never used it.
+    _GENIUS_CANDIDATES = 3
+
+    def _candidates(self) -> int:
+        """Attempts per requirement. An explicit setting always wins, so a
+        user who asked for 5 gets 5 even on fast."""
+        if self.settings.search_candidates > 1:
+            return self.settings.search_candidates
+        return self._GENIUS_CANDIDATES if self.effort == "genius" else 1
+
+    def _focused_budget(self) -> int:
+        """Tool steps inside one focused pass. A cross-file requirement needs
+        read, read, edit, verify — six is tight and nine is not wasteful,
+        because the pass stops as soon as the model stops calling tools."""
+        return 9 if self.effort == "genius" else 6
+
+    def _repair_passes(self) -> int:
+        """How many times a structural or coverage gap may be sent back."""
+        return 3 if self.effort == "genius" else 2
 
     def _structural_nudge(self, problems: list[str]) -> str:
         """Name the breakage AND show the file as it is right now.
@@ -1024,7 +1055,7 @@ class ChatSession:
             )
 
         temperatures = _search_temperatures(
-            self.settings.temperature, self.settings.search_candidates
+            self.settings.temperature, self._candidates()
         )
         self.recorder.event(
             "chat", "search_started",
@@ -1052,7 +1083,7 @@ class ChatSession:
         self,
         requirement: Requirement,
         done: list[Requirement],
-        budget: int = 6,
+        budget: int | None = None,
         temperature: float | None = None,
         note: str = "",
     ) -> bool:
@@ -1069,7 +1100,7 @@ class ChatSession:
         ]
         changed = False
         pushed_back = False
-        for _ in range(budget):
+        for _ in range(budget if budget is not None else self._focused_budget()):
             if self._cancelled():
                 return changed
             if self.on_step is not None:
@@ -1158,15 +1189,24 @@ class ChatSession:
         self.recorder.event("chat", "focused_pass_done", ok=changed)
         return changed
 
-    def _interpret(self, user_text: str) -> str:
+    def _interpret(self, user_text: str, action_turn: bool = True) -> str:
         """Two-model brain: the thinker model turns the raw message into a
         precise brief for the coder. An enhancement, never a blocker — any
-        failure silently falls back to the raw message. Fast skips it;
-        genius self-briefs with the main model when no thinker is set."""
-        if self.effort == "fast":
+        failure silently falls back to the raw message.
+
+        Fast skips it by definition. Otherwise: reason before CHANGING
+        something, answer a question immediately. A configured thinker model
+        does the reasoning; with one model, smart self-briefs on action turns
+        and genius always does.
+
+        This used to be genius-only, so the default setup — one model, smart
+        effort — did no reasoning whatsoever and went straight to tool calls.
+        The brief is also what the UI shows as the chain of thought, which is
+        why Forge appeared to think about nothing before editing a file."""
+        if self.effort == "fast" or not self.settings.gate_intent_brief:
             return ""
         thinker = self._thinker
-        if thinker is None and self.effort == "genius":
+        if thinker is None and (self.effort == "genius" or action_turn):
             thinker = self.llm  # self-brief: reason first, act second
         if thinker is None:
             return ""

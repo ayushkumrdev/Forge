@@ -48,6 +48,11 @@ class ForgeSettings(BaseSettings):
     gate_false_verification: bool = True
     # Auto-inject the most relevant real code before the model generates
     gate_preflight: bool = True
+    # Reason about the request before changing anything. With FORGE_THINKER_MODEL
+    # set, that model writes the brief; with one model, the model briefs itself.
+    # Costs one call per action turn and is what the UI shows as the chain of
+    # thought — without it Forge goes straight from the request to an edit.
+    gate_intent_brief: bool = True
     # Re-ask malformed tool calls under a JSON schema
     gate_constrained_retry: bool = True
     # L2 of the verification ladder: imports and imported names must resolve
