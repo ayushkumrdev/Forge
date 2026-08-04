@@ -274,6 +274,11 @@
     font-size: 12.5px; color: var(--warn); margin: -8px 0 16px;
     padding-left: 13px; border-left: 2px solid rgba(217,164,65,.4);
   }
+  /* one requirement of a multi-part request, run on its own */
+  .step-mark {
+    font-size: 12.5px; color: var(--ink-dim); margin: 2px 0 12px;
+    padding-left: 13px; border-left: 2px solid var(--accent);
+  }
   /* reasoning / chain of thought */
   .think {
     border: 1px solid var(--line-soft); border-radius: var(--r-sm);
@@ -715,8 +720,9 @@ function addUser(text) {
    <think> tags. Pull it out of the answer and show it as collapsed reasoning
    instead of dumping raw tags into the reply. */
 const _THINK_RE = /<think>([\s\S]*?)(?:<\/think>|$)/gi;
-function thinkingCard(text, label) {
-  return `<details class="think"><summary>${LOGO}<span>${esc(label || "Thought process")}</span>`
+function thinkingCard(text, label, open) {
+  return `<details class="think"${open ? " open" : ""}><summary>${LOGO}`
+    + `<span>${esc(label || "Thought process")}</span>`
     + `<span class="chev">⌄</span></summary><div class="think-body">${md(text)}</div></details>`;
 }
 function renderReply(text) {
@@ -818,6 +824,22 @@ function addToolEvents(events) {
         `<div class="m m-forge">${thinkingCard(e.output || "", "Working out what you want")}</div>`);
       continue;
     }
+    if (e.kind === "plan_first") {
+      // multi-part requests are executed one requirement at a time; show the
+      // plan, otherwise the steps below read as unexplained tool calls
+      const steps = String(e.output || "").split(";").map(s => s.trim()).filter(Boolean);
+      const n = e.count || steps.length;
+      $("#lane").insertAdjacentHTML("beforeend",
+        `<div class="m m-forge">${thinkingCard(
+          steps.map((s, i) => `${i + 1}. ${s}`).join("\n"),
+          `Working through this in ${n} step${n === 1 ? "" : "s"}`, true)}</div>`);
+      continue;
+    }
+    if (e.kind === "focused_pass") {
+      $("#lane").insertAdjacentHTML("beforeend",
+        `<div class="step-mark">${esc(e.output || "")}</div>`);
+      continue;
+    }
     if (e.kind === "honesty_violation") {
       if (!e.corrected) continue;  // only show the gate when it actually acted
       $("#lane").insertAdjacentHTML("beforeend",
@@ -908,7 +930,8 @@ async function poll(gen, fast) {
 
     const toolEvents = st.events.filter(e =>
       e.kind === "tool_call" || e.kind === "tool_result" ||
-      e.kind === "intent_brief" || e.kind === "honesty_violation");
+      e.kind === "intent_brief" || e.kind === "honesty_violation" ||
+      e.kind === "plan_first" || e.kind === "focused_pass");
     if (toolEvents.length) { setPartial(""); addToolEvents(toolEvents); }
     S.evtSeen = st.event_count;
 
