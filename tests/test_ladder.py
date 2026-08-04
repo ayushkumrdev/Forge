@@ -831,3 +831,51 @@ def test_a_function_that_never_returns_a_literal_bool_is_left_alone():
     """`a or default` is a legitimate idiom when the function is not a predicate."""
     source = "def pick(a, b):\n    return a or b\n"
     assert inconsistent_boolean_return_errors(source) == []
+
+
+def test_an_or_of_boolean_operands_is_correct_code():
+    """Found by running this detector over Forge's own source: every operand
+    here is already a boolean, so `or` does return a boolean."""
+    source = (
+        "def looks_like_call(text, names):\n"
+        "    if not text:\n"
+        "        return False\n"
+        "    return text.startswith('{') or '\"name\"' in text or not names\n"
+    )
+    assert inconsistent_boolean_return_errors(source) == []
+
+
+def test_bool_wrapped_operands_are_accepted():
+    source = (
+        "def ok(a, b):\n"
+        "    if a is None:\n"
+        "        return False\n"
+        "    return bool(a) and isinstance(b, str)\n"
+    )
+    assert inconsistent_boolean_return_errors(source) == []
+
+
+def test_a_mixed_expression_is_still_reported():
+    """One non-boolean operand is enough to leak a non-boolean out."""
+    source = (
+        "def ok(a, b):\n"
+        "    if a is None:\n"
+        "        return False\n"
+        "    return isinstance(b, str) and a\n"
+    )
+    assert len(inconsistent_boolean_return_errors(source)) == 1
+
+
+def test_the_detector_is_silent_on_forge_s_own_source():
+    """A structural check that fires on correct code is worse than none."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent / "src"
+    findings = [
+        problem
+        for path in root.rglob("*.py")
+        for problem in inconsistent_boolean_return_errors(
+            path.read_text(encoding="utf-8")
+        )
+    ]
+    assert findings == []

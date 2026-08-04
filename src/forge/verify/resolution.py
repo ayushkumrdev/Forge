@@ -385,14 +385,52 @@ def narrowed_signature_errors(original: str, new_content: str) -> list[str]:
     return problems
 
 
+# calls that are known to evaluate to a real boolean
+_BOOLEAN_CALLS = frozenset(
+    {"bool", "isinstance", "issubclass", "callable", "hasattr", "any", "all"}
+)
+_BOOLEAN_METHODS = frozenset(
+    {
+        "startswith", "endswith", "isdigit", "isalpha", "isalnum", "isspace",
+        "islower", "isupper", "istitle", "isidentifier", "isnumeric",
+        "is_file", "is_dir", "exists", "issubset", "issuperset", "isdisjoint",
+    }
+)
+
+
+def _is_boolean_expr(node: ast.expr) -> bool:
+    """Whether this expression already evaluates to a real True/False.
+
+    `a or b` is only a bug when an operand can be something other than a
+    boolean. `x.startswith('{') or '"name"' in x` is correct code and must
+    never be reported — a false rejection costs far more than a missed one."""
+    if isinstance(node, ast.Compare):
+        return True  # includes `in`, `is`, and the ordering operators
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return True
+    if isinstance(node, ast.Constant) and isinstance(node.value, bool):
+        return True
+    if isinstance(node, ast.BoolOp):
+        return all(_is_boolean_expr(value) for value in node.values)
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id in _BOOLEAN_CALLS
+        if isinstance(func, ast.Attribute):
+            return func.attr in _BOOLEAN_METHODS
+    return False
+
+
 def inconsistent_boolean_return_errors(source: str) -> list[str]:
     """A predicate that returns `a and b` instead of a real boolean.
 
     Observed live: `validate_email('@b.com')` returned `''` rather than
     False, because `and` evaluates to one of its operands, not to a boolean.
-    The check is narrow on purpose — it only fires when the same function
-    also returns a literal True or False somewhere, which is the function
-    itself declaring that it deals in booleans."""
+
+    Narrow on two counts, both needed to keep it silent on correct code: the
+    function must also return a literal True or False somewhere — declaring
+    that it deals in booleans — and at least one operand must be something
+    other than a boolean expression."""
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -418,7 +456,7 @@ def inconsistent_boolean_return_errors(source: str) -> list[str]:
             f"the operands (for example '' or None) rather than a boolean — wrap it "
             f"in bool(...)"
             for r in returns
-            if isinstance(r.value, ast.BoolOp)
+            if isinstance(r.value, ast.BoolOp) and not _is_boolean_expr(r.value)
         ]
     return problems
 
