@@ -275,7 +275,8 @@ def test_coverage_runs_at_smart_and_genius(workspace, effort):
         )),
         reply, reply, reply,
     ])
-    session = ChatSession(workspace, llm, ForgeSettings(effort=effort), session_id="cov7")
+    settings = ForgeSettings(effort=effort, gate_plan_first=False)
+    session = ChatSession(workspace, llm, settings, session_id="cov7")
     session.send("set x to 2 and also add y = 3")
     # the decomposition request is identifiable by its system prompt
     systems = [m.content for req in llm.requests for m in req if m.role == "system"]
@@ -312,7 +313,7 @@ def test_focused_pass_gets_a_clean_context(workspace):
         ChatMessage(role="assistant", content="Added it."),
         ChatMessage(role="assistant", content="Both parts are done."),
     ])
-    session = ChatSession(workspace, llm, ForgeSettings(), session_id="foc")
+    session = ChatSession(workspace, llm, ForgeSettings(gate_plan_first=False), session_id="foc")
     reply = session.send("set checkout to 1 and also add apply_discount")
 
     assert "apply_discount" in (workspace / "prices.py").read_text(encoding="utf-8")
@@ -895,3 +896,41 @@ def test_a_missing_import_gets_import_guidance_not_generic_edit_advice(workspace
     nudges = [m.content for m in session.history if "Add the missing import" in m.content]
     assert len(nudges) == 1
     assert "validate_email" in nudges[0]
+
+
+def test_a_step_that_changes_nothing_is_retried_even_when_the_file_was_touched(workspace):
+    """The bug this pins: the ledger is cumulative, so after step one edited
+    taskqueue.py, step two's 'did the named file change?' check said yes and
+    a silently skipped second rename went straight through."""
+    (workspace / "q.py").write_text(
+        "class Q:\n    def push(self, i):\n        pass\n\n"
+        "    def pop(self):\n        pass\n",
+        encoding="utf-8",
+    )
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "rename push to enqueue in q.py"},'
+            ' {"id": 2, "text": "rename pop to dequeue in q.py"}]}'
+        )),
+        # step 1 does its job
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="rename_symbol",
+            arguments={"path": "q.py", "old_name": "push", "new_name": "enqueue"})]),
+        ChatMessage(role="assistant", content="Renamed push."),
+        # step 2 just talks — q.py is already in the ledger from step 1
+        ChatMessage(role="assistant", content="Both renames are already in place."),
+        # the retry does the real work
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="rename_symbol",
+            arguments={"path": "q.py", "old_name": "pop", "new_name": "dequeue"})]),
+        ChatMessage(role="assistant", content="Renamed pop."),
+        ChatMessage(role="assistant", content="Both done."),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": true, "reason": "d"}]}'
+        )),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="pfd")
+    session.send("rename push to enqueue and rename pop to dequeue in q.py")
+    text = (workspace / "q.py").read_text(encoding="utf-8")
+    assert "def enqueue" in text and "def dequeue" in text

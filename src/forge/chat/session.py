@@ -511,17 +511,16 @@ class ChatSession:
                     if self.settings.search_candidates > 1:
                         changed = self._search_requirement(requirement, done)
                     else:
+                        # Judge the step by whether IT changed anything —
+                        # which is what _focused_pass returns. The ledger is
+                        # cumulative and keyed by path, so neither "has this
+                        # file changed" nor a set difference can answer this:
+                        # after step one edits taskqueue.py, a skipped step
+                        # two looks satisfied by step one's work. That is
+                        # precisely how a silently dropped second rename got
+                        # through three runs in a row.
                         changed = self._focused_pass(requirement, done)
-                        # A step that names a file and leaves it untouched
-                        # provably did nothing. Costs no model call to notice,
-                        # and a second clean context often just works — far
-                        # cheaper than discovering the gap at turn end, when
-                        # the context is already polluted.
-                        if mechanically_unmet(
-                            [requirement],
-                            self.ledger.changed_files,
-                            self.ledger.unified_diff(),
-                        ):
+                        if not changed:
                             self.recorder.event(
                                 "chat", "plan_first_retry", output=requirement.text[:160]
                             )
@@ -529,10 +528,13 @@ class ChatSession:
                                 self._focused_pass(
                                     requirement,
                                     done,
-                                    note="A previous attempt at this changed nothing "
-                                    "in the file it names. Read that file, then make "
-                                    "the edit — do not reply until the tool has "
-                                    "reported the change.",
+                                    note="An earlier attempt at THIS step changed "
+                                    "nothing. The other steps listed above are "
+                                    "already done and are not your job — this one "
+                                    "is still outstanding, whatever the file looks "
+                                    "like. Read the file, make this change with a "
+                                    "tool, and do not reply until the tool has "
+                                    "reported it.",
                                 )
                                 or changed
                             )

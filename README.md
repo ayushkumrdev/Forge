@@ -184,6 +184,32 @@ Rejected — the resolution check failed: line 1: 'utils' does not define
 Only **new** failures block: a file that already had a broken import is
 never blamed for it, so Forge can still work inside a half-finished refactor.
 
+### Checks that need the diff, not the file
+
+Some breakage is invisible in the finished file and obvious against what was
+there before. These run **once at the end of a turn**, never per write — a
+rename has to pass through an inconsistent state, and gating each step traps
+the agent instead of helping it:
+
+| check | what it caught |
+| --- | --- |
+| dangling reference | a rename that updated the definition and missed a caller |
+| narrowed signature | `register(name, email)` shipped as `register(user)` |
+| undefined call | the call to `validate_email` landed, the import did not |
+| runaway recursion | `return self._items.pop(0)` hand-edited into `return self.dequeue()` |
+| non-boolean predicate | `return local and domain` gives `''`, not `False` |
+
+Every one of them was written after watching it happen, and each is checked
+against this repository's own source and history before being trusted — a
+check that fires on correct code is worse than no check at all.
+
+### One thing at a time
+
+A request with several parts is decomposed up front, and each part is carried
+out in its own step with a clean context. The model that half-finishes part
+one and then reasons from its own mess will do the same work correctly when
+it is the only thing in front of it — so the mess is never allowed to form.
+
 ## Measuring the agent
 
 Forge ships its own benchmark. `forge eval` runs **SWE-micro** — tiered tasks
@@ -292,7 +318,7 @@ src/forge/
                    slash commands, FORGE.md instructions
   server/          FastAPI API + bundled web dashboard
   cli.py           forge chat | run | serve | plan | index | memory | history | doctor
-tests/             unit + mocked end-to-end tests (101 tests)
+tests/             unit + mocked end-to-end tests
 docs/              architecture and roadmap
 ```
 
