@@ -125,7 +125,9 @@ def _generate_instructions(session: ChatSession) -> str:
         ]
     )
     session.usage.add(response.usage)
-    target.write_text(response.message.content.strip() + "\n", encoding="utf-8")
+    target.write_text(
+        response.message.content.strip() + "\n", encoding="utf-8", newline=""
+    )
     return (
         f"Wrote {target.name} ({len(response.message.content)} chars). "
         "It will be loaded next session."

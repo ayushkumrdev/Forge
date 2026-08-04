@@ -20,6 +20,29 @@ from forge.tools.syntax_check import gate_edit
 from forge.verify.ladder import Ladder
 
 
+def _write_exact(path: Path, content: str) -> None:
+    r"""Write content without translating newlines, keeping the file's own
+    line-ending style.
+
+    Path.write_text defaults to newline=None, which rewrites every "\n" as
+    os.linesep. On Windows that silently turned LF files into CRLF, so
+    editing one line of an ordinary repository produced a diff touching every
+    line — unreviewable, and a merge conflict against every other checkout.
+
+    Reads normalise CRLF to "\n" so the model can match text reliably, so a
+    genuinely CRLF file is converted back here. New files get LF.
+    """
+    if path.exists():
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            raw = b""
+        if b"\r\n" in raw and "\r\n" not in content:
+            content = content.replace("\n", "\r\n")
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        handle.write(content)
+
+
 def _verify(
     ladder: Ladder | None,
     syntax_gate: bool,
@@ -156,7 +179,7 @@ class WriteFileTool(Tool):
             advisory = ""
         self._ledger.record_before_write(resolved)
         resolved.parent.mkdir(parents=True, exist_ok=True)
-        resolved.write_text(content, encoding="utf-8")
+        _write_exact(resolved, content)
         return ToolResult(
             ok=True, output=f"Wrote {len(content)} chars to {path}.{advisory}"
         )
@@ -246,7 +269,7 @@ class EditFileTool(Tool):
                     "Fix new_string and call edit_file again.",
                 )
             self._ledger.record_before_write(resolved)
-            resolved.write_text(result.new_content, encoding="utf-8")
+            _write_exact(resolved, result.new_content)
             note = (
                 " (matched despite whitespace differences)"
                 if result.tier == "whitespace"
@@ -348,7 +371,7 @@ class AppendFileTool(Tool):
                 "content and call append_to_file again.",
             )
         self._ledger.record_before_write(resolved)
-        resolved.write_text(updated, encoding="utf-8")
+        _write_exact(resolved, updated)
         return ToolResult(
             ok=True, output=f"Appended {len(content)} chars to {path}.{advisory}"
         )

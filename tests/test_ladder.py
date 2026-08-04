@@ -381,3 +381,84 @@ def test_dangling_check_runs_at_turn_end(tmp_path):
     assert reply == "Updated every caller."
     assert "queue.push(" not in (repo / "q.py").read_text(encoding="utf-8")
     assert any("no longer exists" in m.content for m in session.history)
+
+
+# -- undefined self-calls: the mirror of a missed caller --------------------------
+# Observed live on t2-rename-in-file: renaming pop->dequeue, the model's edit
+# matched self.pop() (the CALL) instead of `def pop` (the definition), leaving
+# the method under its old name and the call pointing at nothing.
+
+BROKEN_RENAME = (
+    "class Queue:\n"
+    "    def enqueue(self, item):\n"
+    "        self._items.append(item)\n\n"
+    "    def pop(self):\n"
+    "        return self._items.pop(0)\n\n"
+    "    def drain(self):\n"
+    "        return self.dequeue()\n"
+)
+
+
+def test_undefined_self_call_is_caught():
+    from forge.verify.resolution import undefined_self_call_errors
+
+    problems = undefined_self_call_errors(BROKEN_RENAME)
+    assert len(problems) == 1
+    assert "does not define dequeue" in problems[0]
+    assert "did you mean 'enqueue'" in problems[0]
+
+
+def test_completed_rename_has_no_undefined_calls():
+    from forge.verify.resolution import undefined_self_call_errors
+
+    fixed = BROKEN_RENAME.replace("def pop(self):", "def dequeue(self):")
+    assert undefined_self_call_errors(fixed) == []
+
+
+def test_inherited_methods_are_never_flagged():
+    """A base class may supply the method — only base-less classes are judged."""
+    from forge.verify.resolution import undefined_self_call_errors
+
+    source = "class A(Base):\n    def f(self):\n        return self.from_parent()\n"
+    assert undefined_self_call_errors(source) == []
+
+
+def test_callbacks_assigned_on_self_are_not_flagged():
+    from forge.verify.resolution import undefined_self_call_errors
+
+    source = (
+        "class A:\n"
+        "    def __init__(self):\n"
+        "        self.hook = print\n\n"
+        "    def go(self):\n"
+        "        return self.hook()\n"
+    )
+    assert undefined_self_call_errors(source) == []
+
+
+def test_turn_end_catches_a_botched_rename(tmp_path):
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage, ToolCall
+    from forge.llm.mock import MockLLMClient
+
+    repo = _repo(tmp_path)
+    good = BROKEN_RENAME.replace("def pop(self):", "def dequeue(self):")
+    (repo / "q.py").write_text(
+        BROKEN_RENAME.replace("def enqueue", "def push").replace(
+            "self.dequeue()", "self.push()"
+        ),
+        encoding="utf-8",
+    )
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "q.py", "content": BROKEN_RENAME})]),
+        ChatMessage(role="assistant", content="Renamed."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "q.py", "content": good})]),
+        ChatMessage(role="assistant", content="Fixed the method name too."),
+    ])
+    session = ChatSession(repo, llm, ForgeSettings(), session_id="selfcall")
+    reply = session.send("rename push to enqueue and pop to dequeue")
+    assert reply == "Fixed the method name too."
+    assert "def dequeue" in (repo / "q.py").read_text(encoding="utf-8")

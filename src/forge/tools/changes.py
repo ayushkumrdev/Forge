@@ -26,7 +26,7 @@ class ChangeLedger:
             self._originals[path] = original
             backup_path = self.backup_dir / path.relative_to(self.workspace)
             backup_path.parent.mkdir(parents=True, exist_ok=True)
-            backup_path.write_text(original, encoding="utf-8")
+            backup_path.write_text(original, encoding="utf-8", newline="")
         else:
             self._originals[path] = None
 
@@ -51,7 +51,7 @@ class ChangeLedger:
                 path.unlink(missing_ok=True)
             else:
                 path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_text(original, encoding="utf-8")
+                path.write_text(original, encoding="utf-8", newline="")
             restored.append(str(path.relative_to(self.workspace)).replace("\\", "/"))
         self._originals.clear()
         return restored

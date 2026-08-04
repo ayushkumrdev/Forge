@@ -53,7 +53,10 @@ from forge.verify.coverage import (
     looks_multi_requirement,
 )
 from forge.verify.ladder import Ladder
-from forge.verify.resolution import dangling_reference_errors
+from forge.verify.resolution import (
+    dangling_reference_errors,
+    undefined_self_call_errors,
+)
 
 CHAT_SYSTEM = """You are Forge, an elite autonomous AI software engineer running \
 locally on the user's machine with FULL tool access to their repository. You do \
@@ -678,6 +681,11 @@ class ChatSession:
             return int(base * 1.5)
         return base
 
+    @staticmethod
+    def _issue_without_line(problem: str) -> str:
+        _, _, rest = problem.partition(": ")
+        return rest or problem
+
     def _dangling_references(self) -> list[str]:
         """Calls left pointing at definitions this session removed or renamed.
 
@@ -692,10 +700,17 @@ class ChatSession:
             except OSError:
                 continue
             name = path.name
-            problems.extend(
-                f"{name}: {issue}"
-                for issue in dangling_reference_errors(original, current)
-            )
+            issues = dangling_reference_errors(original, current)
+            # only NEW self-call breakage counts; a pre-existing one is not
+            # this change's fault and must never trap the agent
+            before = set(undefined_self_call_errors(original))
+            issues += [
+                issue
+                for issue in undefined_self_call_errors(current)
+                if self._issue_without_line(issue)
+                not in {self._issue_without_line(b) for b in before}
+            ]
+            problems.extend(f"{name}: {issue}" for issue in issues)
         return problems[:4]
 
     def _focused_pass(

@@ -160,6 +160,59 @@ def _called_names(source: str) -> dict[str, int]:
     return calls
 
 
+def undefined_self_call_errors(source: str) -> list[str]:
+    """`self.foo()` where the class has no `foo`.
+
+    The mirror of a missed caller, and just as invisible to every other
+    check. Observed live: renaming `pop` to `dequeue`, the model's edit
+    matched `self.pop()` (the call) instead of `def pop` (the definition),
+    leaving the method defined under its old name and the call pointing at a
+    method that never existed. Valid Python, resolvable imports, AttributeError
+    at runtime.
+
+    Conservative: only classes with no base class are judged, since a base
+    could supply the method, and only calls are checked, not attribute reads.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    problems: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef) or node.bases:
+            continue
+        defined = {
+            item.name
+            for item in ast.walk(node)
+            if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
+        }
+        # attributes assigned on self are legitimate callees too (callbacks)
+        defined |= {
+            target.attr
+            for item in ast.walk(node)
+            if isinstance(item, ast.Assign)
+            for target in item.targets
+            if isinstance(target, ast.Attribute)
+        }
+        for call in ast.walk(node):
+            if not isinstance(call, ast.Call):
+                continue
+            func = call.func
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "self"
+                and func.attr not in defined
+            ):
+                near = _closest(func.attr, defined)
+                hint = f" (did you mean '{near}'?)" if near else ""
+                problems.append(
+                    f"line {call.lineno}: self.{func.attr}() is called but "
+                    f"'{node.name}' does not define {func.attr}{hint}"
+                )
+    return problems
+
+
 def dangling_reference_errors(original: str, new_content: str) -> list[str]:
     """A rename that missed a caller.
 
