@@ -41,6 +41,7 @@ ABLATIONS: dict[str, dict[str, bool]] = {
     "no-resolution": {"gate_resolution": False},
     "no-coverage": {"gate_coverage": False},
     "no-focused-retry": {"gate_focused_retry": False},
+    "search-3": {"search_candidates": 3},
     "no-gates": {
         "syntax_gate": False,
         "gate_edit_repair": False,
@@ -210,6 +211,7 @@ def run_suite(
                 "constrained_retry": run_settings.gate_constrained_retry,
                 "resolution": run_settings.gate_resolution,
                 "coverage": run_settings.gate_coverage,
+                "search_candidates": run_settings.search_candidates,
             },
         }
     )

@@ -385,6 +385,7 @@ def evaluate(
     effort: str = typer.Option("smart", help="fast | smart | genius."),
     ablation: str = typer.Option("all-gates", help="Gate configuration to test."),
     seeds: int = typer.Option(1, help="Repeats per task (run-to-run variance)."),
+    candidates: int = typer.Option(1, help="Candidate attempts per requirement."),
     out: Optional[Path] = typer.Option(None, help="Write the JSON report here."),
 ) -> None:
     """Run the SWE-micro benchmark and report success + behavioural metrics."""
@@ -397,6 +398,7 @@ def evaluate(
 
     settings = _settings(model)
     settings.effort = effort
+    settings.search_candidates = candidates
     ids = [t.strip() for t in task.split(",")] if task else None
 
     console.print(

@@ -58,6 +58,7 @@ from forge.verify.resolution import (
     dangling_reference_errors,
     undefined_self_call_errors,
 )
+from forge.verify.search import _search_temperatures, search
 
 CHAT_SYSTEM = """You are Forge, an elite autonomous AI software engineer running \
 locally on the user's machine with FULL tool access to their repository. You do \
@@ -608,7 +609,17 @@ class ChatSession:
                             self.history.append(
                                 message.model_copy(update={"content": content})
                             )
-                            if self.settings.gate_focused_retry:
+                            if self.settings.search_candidates > 1:
+                                for requirement in missing:
+                                    self._search_requirement(requirement, requirements)
+                                self.history.append(
+                                    ChatMessage(
+                                        role="user",
+                                        content="The missing parts were handled. "
+                                        "Summarize the whole change in plain text.",
+                                    )
+                                )
+                            elif self.settings.gate_focused_retry:
                                 # Give each missing requirement its own clean
                                 # turn instead of a nudge appended to a long,
                                 # polluted history — the same model follows a
@@ -724,8 +735,58 @@ class ChatSession:
             problems.extend(f"{name}: {issue}" for issue in issues)
         return problems[:4]
 
+    def _search_requirement(
+        self, requirement: Requirement, all_requirements: list[Requirement]
+    ) -> bool:
+        """Best-of-N for one requirement: several attempts at different
+        temperatures, each in isolation, keeping whichever actually did the
+        job. This is where extra compute substitutes for a bigger model."""
+        done = [r for r in all_requirements if r is not requirement]
+        judge = self._thinker or self.llm
+
+        def attempt(index: int, temperature: float | None) -> tuple[bool, bool]:
+            changed = self._focused_pass(requirement, done, temperature=temperature)
+            if not changed:
+                return False, False
+            verdict = assess(
+                judge,
+                [requirement],
+                build_evidence(self.ledger.unified_diff(), self.ledger.changed_files, []),
+                self.usage,
+            )
+            return True, not verdict.unmet([requirement])
+
+        temperatures = _search_temperatures(
+            self.settings.temperature, self.settings.search_candidates
+        )
+        self.recorder.event(
+            "chat", "search_started",
+            output=requirement.text[:160], count=len(temperatures),
+        )
+        winner = search(
+            self.workspace,
+            attempt,
+            temperatures,
+            on_candidate=lambda c: self.recorder.event(
+                "chat", "search_candidate", attempt=c.index,
+                ok=c.satisfied, output=", ".join(c.changed)[:200],
+            ),
+        )
+        if winner is None:
+            # workspace too large to snapshot — fall back to a single pass
+            self.recorder.event("chat", "search_skipped")
+            return self._focused_pass(requirement, done)
+        self.recorder.event(
+            "chat", "search_done", attempt=winner.index, ok=winner.satisfied
+        )
+        return bool(winner.changed)
+
     def _focused_pass(
-        self, requirement: Requirement, done: list[Requirement], budget: int = 6
+        self,
+        requirement: Requirement,
+        done: list[Requirement],
+        budget: int = 6,
+        temperature: float | None = None,
     ) -> bool:
         """Run one requirement as a short task with a CLEAN context.
 
@@ -748,6 +809,7 @@ class ChatSession:
                 response = self.llm.chat(
                     [ChatMessage(role="system", content=self._system), *history],
                     tools=self.registry.specs(),
+                    temperature=temperature,
                 )
             except Exception:  # noqa: BLE001 — a focused pass must never kill the turn
                 self.recorder.event("chat", "focused_pass_failed")

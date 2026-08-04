@@ -273,5 +273,6 @@ def test_ablation_presets_disable_real_settings(tmp_path):
         ablation="no-gates",
     )
     gates = report.summary()["config"]["gates"]
-    assert not any(gates.values()), gates
+    # every boolean gate is off; search_candidates is a count, not a flag
+    assert not any(v for v in gates.values() if isinstance(v, bool)), gates
     assert set(ABLATIONS) >= {"all-gates", "no-gates", "no-edit-repair"}

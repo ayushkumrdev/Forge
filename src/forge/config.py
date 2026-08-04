@@ -65,6 +65,11 @@ class ForgeSettings(BaseSettings):
     # a long history. Buys capability from a fixed model by spending its
     # attention better.
     gate_focused_retry: bool = True
+    # Execution-guided candidate search: attempts per missing requirement,
+    # each at a different temperature and in isolation, keeping whichever
+    # actually satisfied it. 1 disables (a single attempt). This is test-time
+    # compute — the lever available when the model cannot be made larger.
+    search_candidates: int = 1
 
     # Repository scanning
     max_tree_entries: int = 400
