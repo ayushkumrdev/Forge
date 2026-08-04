@@ -876,6 +876,20 @@ class ChatSession:
                 "ask for it to change, and code outside this file calls it. Keep "
                 "the behaviour you added, but put it in the body."
             )
+        elif any("never defines or imports it" in p for p in problems):
+            # half-landed cross-file edit: the call went in, the import did not
+            remedy = (
+                "Add the missing import at the top of the file — use who_imports "
+                "or find_symbol first if you are not certain which module defines "
+                "it. If nothing defines it anywhere, write that function before "
+                "calling it."
+            )
+        elif any("recurses forever" in p for p in problems):
+            remedy = (
+                "Put the original body back. Renaming a method does NOT change "
+                "what its body does: only the definition line and calls to it "
+                "from elsewhere change."
+            )
         else:
             remedy = (
                 "Fix every one of them now, copying old_string EXACTLY from the "

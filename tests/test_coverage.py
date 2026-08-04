@@ -861,3 +861,37 @@ def test_overlapping_but_distinct_wording_is_left_alone():
         "rename push to enqueue",
         "update every call site of push to use enqueue",
     )) == 2
+
+
+def test_a_missing_import_gets_import_guidance_not_generic_edit_advice(workspace):
+    """The nudge has to name the actual remedy: the call landed, the import
+    did not, and telling the model to 'copy old_string exactly' does not
+    describe that repair at all."""
+    (workspace / "signup.py").write_text("def register(name):\n    return name\n", "utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "signup.py",
+                       "content": "def register(name):\n"
+                                  "    if not validate_email(name):\n"
+                                  "        raise ValueError('invalid email')\n"
+                                  "    return name\n"})]),
+        ChatMessage(role="assistant", content="Wired the validator in."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "signup.py",
+                       "content": "from validators import validate_email\n\n\n"
+                                  "def register(name):\n"
+                                  "    if not validate_email(name):\n"
+                                  "        raise ValueError('invalid email')\n"
+                                  "    return name\n"})]),
+        ChatMessage(role="assistant", content="Added the import."),
+    ])
+    (workspace / "validators.py").write_text(
+        "def validate_email(a):\n    return True\n", encoding="utf-8"
+    )
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="uci")
+    session.send("make register reject a bad email")
+    nudges = [m.content for m in session.history if "Add the missing import" in m.content]
+    assert len(nudges) == 1
+    assert "validate_email" in nudges[0]
