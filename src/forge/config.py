@@ -52,6 +52,10 @@ class ForgeSettings(BaseSettings):
     gate_resolution: bool = True
     # L3: run pyright/mypy on changed files (opt-in; slow, needs a checker)
     gate_types: bool = False
+    # Requirement coverage: split the request into atomic requirements and
+    # refuse to end the turn while one is provably absent from the diff.
+    # Targets partial completion / task drift, which every other gate misses.
+    gate_coverage: bool = True
 
     # Repository scanning
     max_tree_entries: int = 400

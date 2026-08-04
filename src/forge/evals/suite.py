@@ -6,9 +6,15 @@ on it, which produces no signal for comparing configurations. SWE-micro is
 built to sit in the responsive band for 7B-class models while still being
 real work on real repositories:
 
-  T1  single-file edit        (add a function, fix a bug in one place)
-  T2  cross-file change       (touching imports / several modules)
-  T3  repository-level task   (make a failing test pass, small refactor)
+  T1  single edit             (add a function, fix a bug in one place)
+  T2  several requirements     (multi-part change, still one file)
+  T3  cross-file change        (touching imports / several modules)
+  T4  repository-level task    (make a failing test pass, small refactor)
+
+The ladder is deliberate: the first full sweep found T1 solved ~67% and
+cross-file work solved 0/6 in every configuration — a floor that cannot
+discriminate. T2 exists to fill that gap, holding the file count at one and
+varying only how many requirements the request contains.
 
 Each task materializes a fixture repository, gives the agent a plain-English
 request, and scores it with a hidden pytest suite the agent never sees. The
@@ -118,12 +124,129 @@ _T1_EDGE_CASE = Task(
 
 
 # --------------------------------------------------------------------------
-# T2 — cross-file changes
+# T2 — several requirements, one file
+#
+# The gap the first full sweep exposed: T1 (one edit) was solved ~67% of the
+# time and T3 (coordinate two files) was solved 0/6 in every configuration —
+# a floor with no signal. These tasks keep the work inside a single file and
+# vary only the number of requirements, isolating "did it cover the whole
+# request" from "can it coordinate across modules".
 # --------------------------------------------------------------------------
 
-_T2_ADD_AND_WIRE = Task(
-    id="t2-wire-validator",
+_T2_TWO_PART = Task(
+    id="t2-add-and-use",
     tier=2,
+    request=(
+        "In prices.py: add a function `apply_discount(amount, percent)` that "
+        "returns the amount reduced by that percentage, and then use it inside "
+        "`checkout(items, percent)` so the returned total is discounted."
+    ),
+    files={
+        "prices.py": (
+            "def subtotal(items):\n"
+            '    """Sum of price * qty for every item."""\n'
+            "    return sum(i['price'] * i['qty'] for i in items)\n\n\n"
+            "def checkout(items, percent):\n"
+            '    """Final amount the customer pays."""\n'
+            "    return subtotal(items)\n"
+        ),
+    },
+    check=(
+        "from prices import apply_discount, checkout\n\n"
+        "ITEMS = [{'price': 50, 'qty': 2}]\n\n\n"
+        "def test_discount_helper():\n"
+        "    assert apply_discount(100, 10) == 90\n"
+        "    assert apply_discount(100, 0) == 100\n\n\n"
+        "def test_checkout_uses_it():\n"
+        "    assert checkout(ITEMS, 10) == 90\n\n\n"
+        "def test_checkout_without_discount():\n"
+        "    assert checkout(ITEMS, 0) == 100\n"
+    ),
+    tags=("multi-requirement", "same-file"),
+)
+
+_T2_THREE_PART = Task(
+    id="t2-three-guards",
+    tier=2,
+    request=(
+        "Harden `parse_port(text)` in netconf.py with three changes: strip "
+        "surrounding whitespace before parsing, raise ValueError for a port "
+        "outside 1-65535, and return None instead of crashing when the text "
+        "is not a number at all."
+    ),
+    files={
+        "netconf.py": (
+            "def parse_port(text):\n"
+            '    """Parse a port number from configuration text."""\n'
+            "    return int(text)\n"
+        ),
+    },
+    check=(
+        "import pytest\n\n"
+        "from netconf import parse_port\n\n\n"
+        "def test_strips_whitespace():\n"
+        "    assert parse_port('  8080 ') == 8080\n\n\n"
+        "def test_rejects_out_of_range():\n"
+        "    with pytest.raises(ValueError):\n"
+        "        parse_port('70000')\n"
+        "    with pytest.raises(ValueError):\n"
+        "        parse_port('0')\n\n\n"
+        "def test_non_numeric_is_none():\n"
+        "    assert parse_port('http') is None\n\n\n"
+        "def test_normal_still_works():\n"
+        "    assert parse_port('443') == 443\n"
+    ),
+    tags=("multi-requirement", "same-file", "edge-case"),
+)
+
+_T2_RENAME_LOCAL = Task(
+    id="t2-rename-in-file",
+    tier=2,
+    request=(
+        "In taskqueue.py, rename `push` to `enqueue` and `pop` to `dequeue`, and "
+        "update every use of them inside that same file so nothing breaks."
+    ),
+    files={
+        "taskqueue.py": (
+            "class Queue:\n"
+            "    def __init__(self):\n"
+            "        self._items = []\n\n"
+            "    def push(self, item):\n"
+            "        self._items.append(item)\n\n"
+            "    def pop(self):\n"
+            "        return self._items.pop(0)\n\n"
+            "    def drain(self):\n"
+            "        out = []\n"
+            "        while self._items:\n"
+            "            out.append(self.pop())\n"
+            "        return out\n\n\n"
+            "def fill(queue, values):\n"
+            "    for value in values:\n"
+            "        queue.push(value)\n"
+            "    return queue\n"
+        ),
+    },
+    check=(
+        "from queue import Queue, fill\n\n\n"
+        "def test_renamed():\n"
+        "    q = Queue()\n"
+        "    assert hasattr(q, 'enqueue') and hasattr(q, 'dequeue')\n"
+        "    assert not hasattr(q, 'push') and not hasattr(q, 'pop')\n\n\n"
+        "def test_internal_uses_updated():\n"
+        "    q = fill(Queue(), [1, 2, 3])\n"
+        "    assert q.drain() == [1, 2, 3]\n"
+    ),
+    tags=("multi-requirement", "same-file", "refactor"),
+)
+
+
+# --------------------------------------------------------------------------
+# T3 — cross-file changes
+# --------------------------------------------------------------------------
+
+_T3_ADD_AND_WIRE = Task(
+    id="t3-wire-validator",
+    tier=3,
     request=(
         "Add a `validate_email(address)` helper to validators.py that returns "
         "True only when the address contains exactly one '@' with non-empty "
@@ -168,9 +291,9 @@ _T2_ADD_AND_WIRE = Task(
     tags=("cross-file", "import"),
 )
 
-_T2_RENAME = Task(
-    id="t2-rename-propagate",
-    tier=2,
+_T3_RENAME = Task(
+    id="t3-rename-propagate",
+    tier=3,
     request=(
         "Rename the function `calc` in engine.py to `compute_total`, and update "
         "every place that calls it so nothing is broken."
@@ -207,12 +330,12 @@ _T2_RENAME = Task(
 
 
 # --------------------------------------------------------------------------
-# T3 — repository-level
+# T4 — repository-level
 # --------------------------------------------------------------------------
 
-_T3_FAILING_TEST = Task(
-    id="t3-make-suite-pass",
-    tier=3,
+_T4_FAILING_TEST = Task(
+    id="t4-make-suite-pass",
+    tier=4,
     request=(
         "The test suite in this repository is failing. Run it, find the cause, "
         "and fix the source so every test passes. Do not modify the tests."
@@ -263,9 +386,9 @@ _T3_FAILING_TEST = Task(
     tags=("debug", "run-tests"),
 )
 
-_T3_FEATURE = Task(
-    id="t3-add-cli-flag",
-    tier=3,
+_T4_FEATURE = Task(
+    id="t4-add-cli-flag",
+    tier=4,
     request=(
         "Add a --upper flag to the CLI in app.py: when passed, greet() output "
         "is uppercased. Keep the default behaviour identical."
@@ -299,10 +422,13 @@ SUITE: tuple[Task, ...] = (
     _T1_ADD_FUNCTION,
     _T1_FIX_BUG,
     _T1_EDGE_CASE,
-    _T2_ADD_AND_WIRE,
-    _T2_RENAME,
-    _T3_FAILING_TEST,
-    _T3_FEATURE,
+    _T2_TWO_PART,
+    _T2_THREE_PART,
+    _T2_RENAME_LOCAL,
+    _T3_ADD_AND_WIRE,
+    _T3_RENAME,
+    _T4_FAILING_TEST,
+    _T4_FEATURE,
 )
 
 

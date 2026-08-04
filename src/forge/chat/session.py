@@ -42,6 +42,14 @@ from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
 from forge.tools.vision import IMAGE_EXTENSIONS, ReadImageTool
 from forge.tools.web import FetchUrlTool, WebSearchTool
+from forge.verify.coverage import (
+    Requirement,
+    assess,
+    build_evidence,
+    coverage_nudge,
+    decompose,
+    looks_multi_requirement,
+)
 from forge.verify.ladder import Ladder
 
 CHAT_SYSTEM = """You are Forge, an elite autonomous AI software engineer running \
@@ -189,6 +197,7 @@ _PROMISE_RE = re.compile(
     re.IGNORECASE,
 )
 _MAX_ACTION_NUDGES = 2
+_MAX_COVERAGE_PASSES = 2
 
 _GENIUS_CHECK = (
     "Final completeness check: re-read the user's ORIGINAL request at the "
@@ -404,6 +413,9 @@ class ChatSession:
         corrections = 0
         nudged = False
         genius_checked = False
+        coverage_passes = 0
+        requirements: list[Requirement] | None = None
+        commands_run: list[str] = []
         # the evaluation harness reconstructs per-turn behaviour from the trace
         self.recorder.event(
             "chat", "turn_started", action_turn=action_turn, effort=self.effort
@@ -492,6 +504,52 @@ class ChatSession:
                     self.history.append(message.model_copy(update={"content": content}))
                     self.history.append(ChatMessage(role="user", content=correction))
                     continue
+                # Requirement coverage: the turn may not end while a part of
+                # the request is provably absent from the diff. Checked
+                # against evidence, never against the model's summary.
+                if (
+                    self.settings.gate_coverage
+                    and action_turn
+                    and turn_mutated
+                    and self.effort != "fast"
+                    and coverage_passes < _MAX_COVERAGE_PASSES
+                    and looks_multi_requirement(user_text)
+                ):
+                    if requirements is None:
+                        requirements = decompose(
+                            self._thinker or self.llm, user_text, self.usage
+                        )
+                        if len(requirements) > 1:
+                            self.recorder.event(
+                                "chat", "requirements", count=len(requirements),
+                                output="; ".join(r.text for r in requirements)[:500],
+                            )
+                    # a single-requirement request cannot be partially covered
+                    if len(requirements) > 1:
+                        evidence = build_evidence(
+                            self.ledger.unified_diff(),
+                            self.ledger.changed_files,
+                            commands_run,
+                        )
+                        verdict = assess(
+                            self._thinker or self.llm, requirements, evidence, self.usage
+                        )
+                        missing = verdict.unmet(requirements)
+                        if missing:
+                            coverage_passes += 1
+                            self.recorder.event(
+                                "chat", "coverage_gap",
+                                unmet=[r.text for r in missing],
+                                attempt=coverage_passes,
+                            )
+                            self.history.append(
+                                message.model_copy(update={"content": content})
+                            )
+                            self.history.append(
+                                ChatMessage(role="user", content=coverage_nudge(missing))
+                            )
+                            continue
+
                 if self.effort == "genius" and action_turn and not genius_checked:
                     # highest level: one completeness pass before accepting —
                     # the model must re-read the request and close any gaps
@@ -521,6 +579,9 @@ class ChatSession:
                     turn_mutated = True
                 if result.ok and call.name in ("run_command", "run_powershell"):
                     turn_ran_command = True
+                    command = str(call.arguments.get("command", ""))[:200]
+                    if command:
+                        commands_run.append(command)
                 self.recorder.event(
                     "chat",
                     "tool_result",
