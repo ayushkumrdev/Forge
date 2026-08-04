@@ -664,7 +664,62 @@ changed nothing. The run-4 regression was invisible to every existing
 metric and would have been a screaming 50% on this one. Unobserved stays
 `None`, never 0, in line with the rest of the suite.
 
-**Running total: twenty-two defects, twenty-one outside the model.**
+### 3.5j The loop was throwing away every step's first attempt
+
+Two diagnoses in a row had been blocked because seeds shared a workspace
+that was wiped on each run, so only the last seed's trace survived. Fixing
+that — one workspace per seed — immediately paid for itself, because the
+next three t3 traces said the same thing:
+
+```
+focused_pass       …validate_email helper…
+focused_pass_done  (no tool call)
+plan_first_retry   …validate_email helper…
+focused_pass       …validate_email helper…
+tool_call          read_file
+tool_call          append_to_file
+focused_pass_done  ok=True
+```
+
+**Every first attempt at a focused step made no tool call and was
+abandoned.** The retry — byte-identical except for a line saying *do not
+reply until the tool has reported it* — then did the work, on every seed, in
+both steps. The model was **narrating its plan**, and the loop, which broke
+on the first message without a tool call, could not tell narration from
+refusal.
+
+This is a general result about small-model agent loops, and it is cheap to
+state: **the first message of a step is not a verdict.** A 7B asked to do
+one thing frequently answers "I'll read the file and add the helper" before
+doing it. A loop that treats that as termination discards a step that was
+about to succeed. One sentence of push-back, inside the pass, recovers it —
+where the previous design paid for a whole fresh attempt, and earlier still
+simply lost the requirement.
+
+**ESR is what made this findable**: it read 61% on that run. TSR was 2/3 and
+every other behavioural metric looked healthy.
+
+The same escalation now applies to structural repair. An in-thread nudge
+that does not land is not repeated into an even longer history — the second
+attempt gets a clean context, which is the mechanism this whole line of work
+keeps rediscovering.
+
+**And one defect with much wider reach than any of them**: `is_action_request`
+did not know the verb **"set"**. `"set x to 2 in a.py"` read as
+conversation, so *nothing* was armed for it — not act-don't-tell, not
+plan-first, not coverage. Any request phrased with an unlisted verb silently
+bypassed every gate this project has built. The verb list now covers the
+ordinary ways a change is asked for, and purely explanatory openers
+("explain …", "describe …") never arm the gate with or without a question
+mark, which is what makes the wider list safe.
+
+**Method note, and the most transferable lesson in this document:** when a
+mechanism appears not to work, check whether it *ran* before concluding
+anything about the model. Three of the last five findings were mechanisms
+that were never reached — a gate that was not armed, a retry whose condition
+could not be true, a step discarded before it acted.
+
+**Running total: twenty-five defects, twenty-four outside the model.**
 
 ### 3.6 What the first numbers already tell us
 
