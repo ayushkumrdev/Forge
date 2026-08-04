@@ -458,6 +458,50 @@ pre-filter that silently disabled a gate. Each one had been reading as "the
 auditing the scaffold, is the most expensive mistake available in this
 line of work** — and only tracing real runs distinguishes them.
 
+### 3.5h Rigorous pass: the "model limit" was four more scaffold bugs
+
+I had written that the remaining gap was semantic — the model's ceiling. That
+claim did not survive tracing the three failing tasks. **Every one failed for
+a Forge-side reason.**
+
+**Measured over 3 seeds, 30 runs — the most reliable number here:**
+**TSR 53.3%** (16/30), from 23.8% at the start. T1 7/9, T2 4/9, T3 3/6,
+T4 2/6 — every tier scores, where three were flat zero.
+
+Behavioural metrics across the last runs: **ADT 90-100%**, tool reliability
+90-93%, wasted-cycle 7-11%, **HIR 0%**.
+
+What the trace actually found:
+
+1. **The model had to guess the test runner.** On the repo-level task it ran
+   `unittest discover`, which reported 0 tests because the fixture uses plain
+   pytest functions, concluded the project had none, and started writing its
+   own — abandoning the request. `run_tests` now detects the runner from what
+   the repository contains. T4 went 0/6 to 2/6.
+2. **The coverage judge is optimistic.** Asked whether "register() must raise
+   ValueError" was satisfied, it said yes while signup.py was absent from the
+   diff entirely. `mechanically_unmet()` now decides from the ledger what
+   does not need a model: a requirement naming a file that was never changed
+   is not done, and evidence is unioned with the judge's verdict.
+3. **rename_symbol refused its own repair.** A half-finished rename leaves a
+   reference to the new name; the collision check counted that as "already
+   used" and rejected the rename that would have fixed it. Only a definition
+   collides now.
+4. **The act-don't-tell gate only caught deflection SHAPES.** One failed
+   edit, a plain-prose "I could not locate that text", turn over, file
+   untouched — no fence, no promise, nothing to catch. An action turn ending
+   with no change after a failed write is now bounced once.
+
+**A flaw in fix 4, caught by two existing tests**: a permission denial is
+also a failed write, so the gate would have pushed the model to retry what
+the USER refused — Forge arguing with its own permission prompt. Denials are
+excluded and the behaviour is pinned by a test.
+
+**Running total: fourteen defects this session, thirteen in the harness or
+tool layer.** The one genuine model limitation is narrow — coordinating two
+edits in one turn (`t2-rename-in-file`, `t3-wire-validator`, both 0/3) — and
+I would not now assert even that without tracing it again.
+
 ### 3.6 What the first numbers already tell us
 
 - The remaining tier-1 failure is **deflection, not capability**: ADT 0% on

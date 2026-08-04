@@ -323,13 +323,31 @@ T3 2/4, T4 1/4) — from 23.8% and three empty tiers at the start of the hunt.
 - **Tool argument errors ground the model**: missing/unexpected arguments are
   named in the tool's vocabulary instead of leaking a Python signature.
 
-## Milestone 23 — Execution isolation & scale
+## ✅ Milestone 23 — Rigorous flaw pass (TSR 53.3% over 30 runs)
+Measured on 3 seeds: T1 7/9, T2 4/9, T3 3/6, T4 2/6 — every tier scores,
+from 23.8% and three empty tiers. ADT 90-100%, tool reliability 90-93%,
+HIR 0%.
+- **`run_tests`**: detects the project's runner instead of making the model
+  guess. It ran `unittest discover` on a pytest-style suite, got "0 tests",
+  and started writing its own. T4 0/6 -> 2/6.
+- **`mechanically_unmet()`**: the coverage judge declared a requirement met
+  while the file it named was absent from the diff. Evidence from the ledger
+  now overrides the model's opinion.
+- **rename_symbol collision check**: a dangling reference to the new name is
+  a half-finished rename, not a collision — it was refusing its own repair.
+- **Give-up gate**: an action turn ending with no change after a failed write
+  is bounced. Permission denials are excluded, so Forge never argues with a
+  user who said no.
+- Tool argument errors name the missing parameter instead of leaking a Python
+  signature; empty old_string on a missing file points at write_file.
+
+## Milestone 24 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 24 — More agents & evaluation
+## Milestone 25 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness
