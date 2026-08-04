@@ -35,14 +35,36 @@ that must be TRUE when it is finished.
 
 Rules:
 - One requirement per distinct outcome. "Add X and use it in Y" is TWO.
-- Each must be checkable by looking at code: name the function, file or
-  behaviour involved.
+- Requirements must NOT OVERLAP. Each names work no other one covers, so
+  they can be done independently and in any order.
+- A rename INCLUDES updating everything that referred to the old name. It is
+  ONE requirement, never a separate "update the callers" requirement.
+- NEVER emit a requirement that only restates quality: "ensure nothing is
+  broken", "verify it works", "test the change", "keep the code clean". Those
+  are not outcomes, they are wishes, and they cannot be checked.
 - Only what the user asked for. Never invent extra work such as writing
   tests, adding documentation or refactoring, unless the user asked.
-- At most 6. Most requests have one or two.
+- Fewer is better. Most requests have one or two. At most 6.
+
+Example — "rename push to enqueue and pop to dequeue, update every use":
+{"requirements": [
+  {"id": 1, "text": "push is renamed to enqueue, including every call to it"},
+  {"id": 2, "text": "pop is renamed to dequeue, including every call to it"}
+]}
 
 Respond with ONLY this JSON:
 {"requirements": [{"id": 1, "text": "<what must be true>"}]}"""
+
+# The model still slips these in. They are unfalsifiable, so a coverage check
+# on one either passes vacuously or sends the agent chasing a platitude —
+# observed live: "Ensure that no functionality is broken after renaming"
+# consumed a full search round and produced an arbitrary edit.
+_META_REQUIREMENT_RE = re.compile(
+    r"^\s*(?:ensure|verify|make sure|check|confirm|test|validate)\b"
+    r"|^\s*(?:no|nothing)\b.{0,40}\b(?:broken|breaks|regress)"
+    r"|\b(?:works? correctly|still works?|as expected|without breaking)\b",
+    re.IGNORECASE,
+)
 
 _ASSESS_SYSTEM = """You check whether each requirement is satisfied by the \
 work that was ACTUALLY done.
@@ -110,7 +132,8 @@ def decompose(llm: LLMClient, request: str, usage: Usage | None = None) -> list[
         )
     except (StructuredOutputError, Exception):  # noqa: BLE001 — never break the turn
         return []
-    return result.requirements[:_MAX_REQUIREMENTS]
+    real = [r for r in result.requirements if not _META_REQUIREMENT_RE.search(r.text)]
+    return real[:_MAX_REQUIREMENTS]
 
 
 def build_evidence(diff: str, changed_files: list[str], commands: list[str]) -> str:

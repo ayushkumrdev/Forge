@@ -383,3 +383,47 @@ def test_focused_pass_failure_does_not_break_the_turn(workspace):
     ])
     session = ChatSession(workspace, llm, ForgeSettings(), session_id="foc3")
     assert session.send("set x to 2 and also add y") == "Summary after the failed pass."
+
+
+# -- decomposition quality: the bug that made search worse than no search ----------
+# Observed live: "rename push to enqueue and pop to dequeue, update every use"
+# was split into FIVE requirements — two renames, two overlapping "update all
+# occurrences" duplicates of those renames, and "ensure that no functionality
+# is broken". Candidate search then spent a full round re-doing work and a
+# round chasing the platitude.
+
+
+def test_meta_requirements_are_dropped():
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content=(
+            '{"requirements": ['
+            ' {"id": 1, "text": "push is renamed to enqueue"},'
+            ' {"id": 2, "text": "Ensure that no functionality is broken"},'
+            ' {"id": 3, "text": "Verify the change works correctly"},'
+            ' {"id": 4, "text": "Test the renamed methods"}]}'
+        )),
+    ])
+    reqs = decompose(llm, "rename push and also pop")
+    assert [r.text for r in reqs] == ["push is renamed to enqueue"]
+
+
+def test_real_requirements_survive_the_filter():
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content=(
+            '{"requirements": ['
+            ' {"id": 1, "text": "apply_discount(amount, percent) exists in prices.py"},'
+            ' {"id": 2, "text": "checkout applies the discount to its total"}]}'
+        )),
+    ])
+    assert len(decompose(llm, "add apply_discount and use it in checkout")) == 2
+
+
+def test_decompose_prompt_forbids_overlap_and_platitudes():
+    """The prompt itself carries the rules; if it is ever rewritten, these
+    constraints must survive."""
+    from forge.verify.coverage import _DECOMPOSE_SYSTEM
+
+    assert "NOT OVERLAP" in _DECOMPOSE_SYSTEM
+    assert "rename INCLUDES updating" in _DECOMPOSE_SYSTEM
+    assert "only restates quality" in _DECOMPOSE_SYSTEM
+    assert "verify it works" in _DECOMPOSE_SYSTEM
