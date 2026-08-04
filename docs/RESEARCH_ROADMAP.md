@@ -639,6 +639,31 @@ It is also the second time in this section that a metric other than TSR
 carried the diagnosis: 100% tool reliability with one call per run is not a
 clean run, it is a run that barely happened.
 
+**Re-measured after the fix: back to 3/6**, t2 2/3 and t3 1/3, tool
+reliability 97.9%, wasted-cycle 4.2%, ADT 100%, HIR 0%. The surviving trace
+is the one this whole section was aiming at:
+
+```
+plan_first        rename push to enqueue …; rename pop to dequeue …
+focused_pass      rename push to enqueue …
+tool_call         rename_symbol
+focused_pass_done ok=True
+focused_pass      rename pop to dequeue …
+tool_call         rename_symbol
+focused_pass_done ok=True
+```
+
+Two steps, one correct tool call each, nothing wasted.
+
+**Across the five measured runs** (15 attempts per task under the evolving
+system), `t2-rename-in-file` and `t3-wire-validator` went from **0/24 to
+6/12 in the last two runs with the fix in place**. Both had never passed.
+
+**New metric — ESR (empty-step rate)**, the share of plan-first steps that
+changed nothing. The run-4 regression was invisible to every existing
+metric and would have been a screaming 50% on this one. Unobserved stays
+`None`, never 0, in line with the rest of the suite.
+
 **Running total: twenty-two defects, twenty-one outside the model.**
 
 ### 3.6 What the first numbers already tell us

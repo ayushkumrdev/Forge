@@ -522,10 +522,10 @@ def sweep(
     persist(summaries)
     console.print(f"[dim]sweep written to {destination}[/dim]")
 
-    table = Table("config", "TSR", "ADT", "FVR", "GER", "HIR", "WCR", "tools", "time")
+    table = Table("config", "TSR", "ADT", "FVR", "GER", "HIR", "WCR", "ESR", "tools", "time")
     for name, summary in summaries.items():
         if "error" in summary:
-            table.add_row(name, "ERROR", *[""] * 7)
+            table.add_row(name, "ERROR", *[""] * 8)
             continue
         metrics = summary["metrics"]
 
@@ -541,6 +541,7 @@ def sweep(
             show("grounded_edit"),
             show("hallucinated_identifier"),
             show("wasted_cycle"),
+            show("empty_step"),
             f"{metrics['totals']['tool_calls']}"
             f" ({metrics['totals']['tool_failures']} failed)",
             f"{summary['duration_s']:.0f}s",

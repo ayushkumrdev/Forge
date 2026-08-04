@@ -299,3 +299,23 @@ def test_every_task_is_actually_solvable(tmp_path):
         if not solved:
             unsolvable.append(f"{task.id}:\n{output[:600]}")
     assert not unsolvable, "tasks whose checks cannot be satisfied:\n" + "\n\n".join(unsolvable)
+
+
+def test_empty_step_rate_counts_focused_steps_that_did_nothing():
+    """The metric that would have caught a silently skipped plan-first step:
+    the run that exposed it had 100% tool reliability and 0% wasted cycles
+    while doing half the work it was asked for."""
+    events = [
+        {"kind": "focused_pass_done", "ok": True},
+        {"kind": "focused_pass_done", "ok": False},
+    ]
+    m = metrics_from_events(events)
+    assert m.focused_steps == 2
+    assert m.focused_steps_empty == 1
+    assert m.empty_step == 0.5
+
+
+def test_empty_step_is_unobserved_without_focused_steps():
+    """Unobserved must stay None, never 0 — a turn with no plan-first steps
+    has not demonstrated anything about them."""
+    assert metrics_from_events([{"kind": "turn_finished"}]).empty_step is None

@@ -61,6 +61,11 @@ class TrajectoryMetrics(BaseModel):
     wasted_cycle: float | None = None
     tool_reliability: float | None = None
     hallucinated_identifier: float | None = None
+    # share of plan-first steps that changed nothing at all. A silently
+    # skipped step is invisible to every other metric here — the run that
+    # exposed this had 100% tool reliability and 0% wasted cycles while
+    # doing half the work it was asked for.
+    empty_step: float | None = None
 
     # raw counts — the evidence behind the rates
     turns: int = 0
@@ -80,6 +85,8 @@ class TrajectoryMetrics(BaseModel):
     violations_corrected: int = 0
     llm_calls: int = 0
     completion_tokens: int = 0
+    focused_steps: int = 0
+    focused_steps_empty: int = 0
 
     def summary_line(self) -> str:
         def pct(value: float | None) -> str:
@@ -119,6 +126,11 @@ def metrics_from_events(events: Iterable[dict[str, Any]]) -> TrajectoryMetrics:
             if event.get("corrected"):
                 m.violations_corrected += 1
 
+        elif kind == "focused_pass_done":
+            m.focused_steps += 1
+            if not event.get("ok"):
+                m.focused_steps_empty += 1
+
         elif kind == "llm_response":
             m.llm_calls += 1
             m.completion_tokens += int(event.get("completion_tokens") or 0)
@@ -155,6 +167,7 @@ def metrics_from_events(events: Iterable[dict[str, Any]]) -> TrajectoryMetrics:
     m.wasted_cycle = _ratio(m.repeated_calls, m.tool_calls)
     m.tool_reliability = _ratio(m.tool_calls - m.tool_failures, m.tool_calls)
     m.hallucinated_identifier = _ratio(m.resolution_rejections, m.write_attempts)
+    m.empty_step = _ratio(m.focused_steps_empty, m.focused_steps)
     return m
 
 
@@ -186,6 +199,7 @@ def aggregate(runs: list[TrajectoryMetrics]) -> dict[str, Any]:
         "wasted_cycle",
         "tool_reliability",
         "hallucinated_identifier",
+        "empty_step",
     ):
         values = [v for v in (getattr(r, field) for r in runs) if v is not None]
         out[field] = (
