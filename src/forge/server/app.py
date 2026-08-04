@@ -153,12 +153,17 @@ def create_app(
 
     # -- dashboard ------------------------------------------------------------------
 
+    # The UI is served from disk and changes whenever Forge is updated, so it
+    # must never be cached: a stale copy silently hides new features and
+    # re-introduces fixed bugs, with nothing on screen to explain why.
+    _NO_CACHE = {"Cache-Control": "no-store, must-revalidate", "Pragma": "no-cache"}
+
     @app.get("/", include_in_schema=False)
     def index() -> FileResponse:
-        return FileResponse(_STATIC_DIR / "index.html")
+        return FileResponse(_STATIC_DIR / "index.html", headers=_NO_CACHE)
 
     @app.get("/app", include_in_schema=False)
     def desktop_app() -> FileResponse:
-        return FileResponse(_STATIC_DIR / "app.html")
+        return FileResponse(_STATIC_DIR / "app.html", headers=_NO_CACHE)
 
     return app

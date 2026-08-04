@@ -752,7 +752,8 @@ function copyReply(id, btn) {
 }
 
 const GLYPHS = {
-  read_file:"◇", write_file:"✎", edit_file:"✎", delete_file:"✕", list_dir:"▤",
+  read_file:"◇", write_file:"✎", edit_file:"✎", append_to_file:"✚",
+  delete_file:"✕", list_dir:"▤",
   run_command:"❯", run_powershell:"❯", grep:"⌕", find_files:"⌕", search_code:"◈",
   read_image:"▣",
   find_symbol:"ƒ", who_imports:"⇄", git:"⎇", fetch_url:"↗", web_search:"⌕",
@@ -776,7 +777,8 @@ function lastPendingCard() {
   }
   return null;
 }
-const FILE_VERBS = { write_file: "Created", edit_file: "Edited", delete_file: "Deleted" };
+const FILE_VERBS = { write_file: "Created", edit_file: "Edited",
+                     append_to_file: "Added to", delete_file: "Deleted" };
 // the thread should read as a narrative of actions, not a log of function names
 const TOOL_VERBS = {
   ...FILE_VERBS,
@@ -799,7 +801,8 @@ function fileOpBody(e) {
   const a = e.arguments || {};
   if (e.tool === "edit_file")
     return diffLines(a.old_string, "-", "dd") + diffLines(a.new_string, "+", "da");
-  if (e.tool === "write_file") return diffLines(a.content, "+", "da");
+  if (e.tool === "write_file" || e.tool === "append_to_file")
+    return diffLines(a.content, "+", "da");
   return `<div class="dline dd">- ${esc(a.path || "")}</div>`;
 }
 const GATE_LABEL = {
