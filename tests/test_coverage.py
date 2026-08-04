@@ -860,11 +860,12 @@ def test_two_genuinely_different_requirements_both_survive():
 
 
 def test_overlapping_but_distinct_wording_is_left_alone():
-    """Losing a real requirement is far worse than attempting one twice, so
-    anything short of a restatement is kept."""
+    """Anything short of a restatement is kept: losing a real requirement is
+    worse than attempting one twice. (The rename follow-up below is the one
+    exception, and it earned that exception in a trace.)"""
     assert len(_decomposed(
-        "rename push to enqueue",
-        "update every call site of push to use enqueue",
+        "add a slugify helper to strings.py",
+        "call slugify from the titlecase docstring example",
     )) == 2
 
 
@@ -1046,3 +1047,73 @@ def test_the_push_back_happens_at_most_once_per_step(workspace):
     # two requirements, each attempted twice (pass + outer retry), one
     # push-back each — and each push-back is visible in that pass's later calls
     assert push_backs == 4
+
+
+def test_a_rename_swallows_its_own_call_site_follow_up():
+    """Straight from a live trace: the decomposer split one rename into four
+    requirements, and the two follow-ups hunted for call sites rename_symbol
+    had already updated — 28 tool calls, 8 failures, file left in NameError,
+    on a task that takes 2 calls when it goes right."""
+    assert _decomposed(
+        "rename push to enqueue in taskqueue.py",
+        "rename pop to dequeue in taskqueue.py",
+        "update every call to push with enqueue in taskqueue.py",
+        "update every call to pop with dequeue in taskqueue.py",
+    ) == [
+        "rename push to enqueue in taskqueue.py",
+        "rename pop to dequeue in taskqueue.py",
+    ]
+
+
+def test_a_follow_up_naming_only_one_side_of_the_rename_survives():
+    """Both names are required, so real follow-on work is never dropped."""
+    assert len(_decomposed(
+        "rename push to enqueue in taskqueue.py",
+        "update the README to document enqueue",
+    )) == 2
+
+
+def test_a_follow_up_without_the_rename_is_untouched():
+    assert len(_decomposed(
+        "add a slugify helper to strings.py",
+        "update every call to titlecase to use slugify",
+    )) == 2
+
+
+def test_the_push_back_repeats_the_tool_guidance(workspace):
+    """The push-back is exactly the moment the model picks an instrument. A
+    bare 'use a tool' pushed a rename into hand-editing: 28 calls, 8 failures
+    and a NameError on a task that takes 2 calls when it goes right."""
+    (workspace / "q.py").write_text("def push():\n    pass\n", encoding="utf-8")
+    (workspace / "r.py").write_text("def pop():\n    pass\n", encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "rename push to enqueue in q.py"},'
+            ' {"id": 2, "text": "rename pop to dequeue in r.py"}]}'
+        )),
+        ChatMessage(role="assistant", content="I will rename push now."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="rename_symbol",
+            arguments={"path": "q.py", "old_name": "push", "new_name": "enqueue"})]),
+        ChatMessage(role="assistant", content="Renamed push."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="rename_symbol",
+            arguments={"path": "r.py", "old_name": "pop", "new_name": "dequeue"})]),
+        ChatMessage(role="assistant", content="Renamed pop."),
+        ChatMessage(role="assistant", content="Both renamed."),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": true, "reason": "d"}]}'
+        )),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="pbg")
+    session.send("rename push to enqueue in q.py and rename pop to dequeue in r.py")
+
+    push_backs = [
+        m.content
+        for req in llm.requests for m in req
+        if "a reply is not an edit" in m.content
+    ]
+    assert push_backs
+    assert "rename_symbol" in push_backs[0]
+    assert '"old_name": "push"' in push_backs[0]

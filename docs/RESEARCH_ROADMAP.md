@@ -719,7 +719,39 @@ anything about the model. Three of the last five findings were mechanisms
 that were never reached — a gate that was not armed, a retry whose condition
 could not be true, a step discarded before it acted.
 
-**Running total: twenty-five defects, twenty-four outside the model.**
+**The push-back worked, and uncovered the next thing.** ESR fell **61% →
+9.3%**: steps now act. But tool calls went 24 → 65, failures 1 → 13, and one
+t2 seed spent 28 calls to leave the file in a `NameError`. The trace named
+the cause immediately, and it was not the push-back:
+
+```
+plan_first  rename push to enqueue …; rename pop to dequeue …;
+            update every call to push with enqueue …;
+            update every call to pop with dequeue …
+```
+
+**One rename, decomposed into four requirements.** `rename_symbol` renames
+the definition *and* every reference in a single operation, so requirements
+three and four ran after the work was already done, went hunting for call
+sites that no longer existed, and hand-edited the file to death. The
+decomposer's own prompt already says a rename is one requirement including
+its callers — it simply did not follow it that run.
+
+This is the third time a prompt-level rule has failed where a mechanical
+rule holds, and it is worth stating as a design principle for the paper:
+**an instruction to the model is a hope; a filter on its output is a
+guarantee.** The rename follow-up is now removed mechanically, and requires
+both names of the rename plus a follow-up word so that genuine follow-on
+work ("update the README to document enqueue") is never touched.
+
+Two smaller consequences of the same trace: the push-back now repeats the
+requirement's tool guidance, because it arrives exactly when the model is
+choosing an instrument and a bare "use a tool" is what let a rename fall
+into `edit_file`; and one earlier test — which asserted that a rename and
+its "update every call site" follow-up should *both* survive — was overruled
+by the evidence and rewritten.
+
+**Running total: twenty-six defects, twenty-five outside the model.**
 
 ### 3.6 What the first numbers already tell us
 

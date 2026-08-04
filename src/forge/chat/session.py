@@ -55,6 +55,7 @@ from forge.verify.coverage import (
     focused_prompt,
     looks_multi_requirement,
     mechanically_unmet,
+    tool_guidance,
 )
 from forge.verify.ladder import Ladder
 from forge.verify.resolution import (
@@ -1126,7 +1127,11 @@ class ChatSession:
                         content="Nothing has changed on disk yet — a reply is "
                         "not an edit. Make the change now with a tool call, and "
                         "do not answer in plain text until the tool has reported "
-                        "that it landed.",
+                        "that it landed.\n\n"
+                        # the guidance goes back in here on purpose: this is
+                        # the moment the model picks an instrument, and a bare
+                        # "use a tool" pushed a rename into hand-editing
+                        + tool_guidance(requirement),
                     )
                 )
                 continue

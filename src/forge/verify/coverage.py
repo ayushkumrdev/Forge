@@ -163,7 +163,7 @@ def decompose(llm: LLMClient, request: str, usage: Usage | None = None) -> list[
     except (StructuredOutputError, Exception):  # noqa: BLE001 — never break the turn
         return []
     real = [r for r in result.requirements if not _META_REQUIREMENT_RE.search(r.text)]
-    return _drop_restatements(real)[:_MAX_REQUIREMENTS]
+    return _drop_rename_followups(_drop_restatements(real))[:_MAX_REQUIREMENTS]
 
 
 _WORD_RE = re.compile(r"[a-z0-9_]+")
@@ -177,6 +177,42 @@ _FILLER = frozenset(
 
 def _content_words(text: str) -> frozenset[str]:
     return frozenset(_WORD_RE.findall(text.lower())) - _FILLER
+
+
+# "update every call to push with enqueue" — the work a rename already did
+_FOLLOWUP_WORDS = frozenset(
+    {"update", "updated", "updates", "updating", "call", "calls", "occurrence",
+     "occurrences", "usage", "usages", "reference", "references", "use", "uses",
+     "used", "replace", "replaced", "change", "changed"}
+)
+
+
+def _drop_rename_followups(requirements: list[Requirement]) -> list[Requirement]:
+    """Remove "…and update every call to it" when a rename already covers it.
+
+    `rename_symbol` renames the definition AND every reference in one
+    operation, so a follow-up requirement asking for the call sites is work
+    that is already done by the time it runs. Observed live, and expensive:
+    the decomposer split one rename into four requirements, the two
+    follow-ups went hunting for call sites that no longer existed, and
+    hand-edited the file into `NameError` — 28 tool calls and 8 failures on a
+    task that takes 2 calls when it goes right.
+
+    Requires BOTH names of the rename plus a follow-up word, so "update the
+    README to mention enqueue" is never mistaken for one."""
+    renamed: list[frozenset[str]] = []
+    kept: list[Requirement] = []
+    for requirement in requirements:
+        pair = rename_pair(requirement.text)
+        words = _content_words(requirement.text)
+        if pair is None and renamed and words & _FOLLOWUP_WORDS:
+            names = {word.lower() for word in words}
+            if any(earlier <= names for earlier in renamed):
+                continue
+        if pair is not None:
+            renamed.append(frozenset(name.lower() for name in pair))
+        kept.append(requirement)
+    return kept
 
 
 def _drop_restatements(requirements: list[Requirement]) -> list[Requirement]:
@@ -299,7 +335,7 @@ def rename_pair(text: str) -> tuple[str, str] | None:
     return None
 
 
-def _how_to_do_it(requirement: Requirement) -> str:
+def tool_guidance(requirement: Requirement) -> str:
     """Tool guidance shaped by what the requirement actually asks for.
 
     This used to be one fixed line naming edit_file and append_to_file, which
@@ -372,7 +408,7 @@ def focused_prompt(
     return (
         f"Do exactly this one thing, nothing else:\n\n{requirement.text}"
         f"{context}\n\n"
-        f"{_how_to_do_it(requirement)} Reply in plain text only when the "
+        f"{tool_guidance(requirement)} Reply in plain text only when the "
         "change is in the file."
     )
 
