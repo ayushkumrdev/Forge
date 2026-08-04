@@ -223,7 +223,7 @@ _MAX_STRUCTURAL_PASSES = 2
 # inflated ADT and stopped the act-don't-tell gate from firing on a model
 # that just re-ran the tests instead of writing code.
 _FILE_MUTATING_TOOLS = frozenset(
-    {"write_file", "edit_file", "append_to_file", "delete_file"}
+    {"write_file", "edit_file", "append_to_file", "delete_file", "rename_symbol"}
 )
 
 _GENIUS_CHECK = (

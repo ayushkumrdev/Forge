@@ -181,3 +181,29 @@ def test_rename_preserves_line_endings(workspace):
 
 def test_tool_is_registered(workspace):
     assert "rename_symbol" in _session(workspace).registry.names()
+
+
+def test_rename_counts_as_acting(workspace):
+    """rename_symbol changes files, so it must be in the file-mutating set:
+    otherwise a turn that only renamed something is scored as having done
+    nothing — under-reporting ADT, tripping the act-don't-tell gate, and
+    skipping the structural checks that follow a mutation."""
+    from forge.chat.session import _FILE_MUTATING_TOOLS
+
+    assert "rename_symbol" in _FILE_MUTATING_TOOLS
+
+
+def test_a_rename_only_turn_is_not_bounced(workspace):
+    from forge.llm.base import ChatMessage, ToolCall
+
+    (workspace / "q.py").write_text(QUEUE, encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="rename_symbol",
+            arguments={"path": "q.py", "old_name": "push", "new_name": "enqueue"})]),
+        ChatMessage(role="assistant", content="Renamed push to enqueue."),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="rnact")
+    reply = session.send("rename push to enqueue in q.py")
+    assert reply == "Renamed push to enqueue."
+    assert len(llm.requests) == 2  # accepted first time, no deflection nudge

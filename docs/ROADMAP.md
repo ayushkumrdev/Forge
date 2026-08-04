@@ -286,13 +286,36 @@ with search on (matched control 22.2%).
 - Decomposition fixed: it had been emitting overlapping and unfalsifiable
   requirements, which made search *worse* than no search until repaired.
 
-## Milestone 21 — Execution isolation & scale
+## ✅ Milestone 21 — rename_symbol, candidate search, and a broken benchmark
+Overall TSR 23.8% -> **45.0%**; tier 2 0/6 -> **6/9**.
+- **`rename_symbol`**: renaming as ONE correct AST operation. Text
+  substitution is the wrong instrument — asked to rename `pop`, the model
+  issued edit_file with "pop()", which matched `self.pop()` (the CALL)
+  instead of `def pop(self)`, and never recovered. Comments, strings and
+  identifiers that merely share the name are untouched; attribute renames
+  follow only a plain receiver, so a list's own `.pop()` is left alone.
+- **Candidate search** (`verify/search.py`, `FORGE_SEARCH_CANDIDATES`):
+  k attempts per requirement at diverse temperatures, isolated by byte-exact
+  snapshots, scored by requirement coverage and the ladder, best kept.
+  Matched control on tier 2: k=1 2/9, k=3 4/9.
+- **The benchmark itself was broken**: `t2-rename-in-file` imported the
+  stdlib `queue` instead of the fixture's `taskqueue`, so it could never pass
+  no matter what Forge produced. Every task now carries a reference solution
+  and a test proves all ten are solvable — a broken check is a failing test,
+  not a permanent silent zero.
+- **Method signatures**: a rename that drops `self` (`def enqueue(item)`)
+  parses, resolves, and fails at every call. Now caught from the AST.
+- Structural checks re-run after each fix attempt (bounded), and their nudge
+  carries the file's current contents plus, for a rename, the exact
+  rename_symbol call to make.
+
+## Milestone 22 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 22 — More agents & evaluation
+## Milestone 23 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness
