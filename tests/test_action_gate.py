@@ -433,3 +433,16 @@ def test_a_clean_no_op_answer_is_still_allowed(workspace):
     session = _session(workspace, llm)
     assert session.send("change x to 2 in app.py") == "x is already 2; no change needed."
     assert len(llm.requests) == 2
+
+
+def test_noun_heavy_words_do_not_arm_the_gate():
+    """A remark that happens to contain 'import' or 'cache' is not a request
+    to change anything, and a false arming costs a wasted correction cycle."""
+    from forge.chat.session import is_action_request
+
+    for text in [
+        "the import graph is built at startup",
+        "the cache is stale after a rename",
+        "this document describes the protocol",
+    ]:
+        assert not is_action_request(text), text

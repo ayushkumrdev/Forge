@@ -200,8 +200,11 @@ _ACTION_REQUEST_RE = re.compile(
     # not the act-don't-tell gate, not plan-first, not coverage. Every verb
     # below is one a user plainly uses to ask for a change.
     r"set|sort|insert|append|prepend|bump|swap|reorder|revert|strip|trim|"
-    r"normali[sz]|rais|catch|expose|export|import|register|document|hook|"
-    r"wrap|rename|drop|expand|shorten|rename|dedupe|cache|validat)"
+    # kept out on purpose: import, cache, export, document, hook, register.
+    # They are nouns at least as often as verbs here ("the import graph",
+    # "the cache is stale"), and arming the gate on a plain remark costs a
+    # wasted correction cycle.
+    r"normali[sz]|rais|catch|expose|wrap|drop|expand|shorten|dedupe|validat)"
     r"(?:e|es|ed|ing|s)?\b",
     re.IGNORECASE,
 )
