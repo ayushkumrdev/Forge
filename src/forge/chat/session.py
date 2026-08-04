@@ -54,6 +54,7 @@ from forge.verify.coverage import (
     decompose,
     focused_prompt,
     looks_multi_requirement,
+    mechanically_unmet,
 )
 from forge.verify.ladder import Ladder
 from forge.verify.resolution import (
@@ -611,7 +612,16 @@ class ChatSession:
                         verdict = assess(
                             self._thinker or self.llm, requirements, evidence, self.usage
                         )
-                        missing = verdict.unmet(requirements)
+                        # evidence overrides the judge: a requirement naming a
+                        # file that was never touched is not done, whatever
+                        # the model says about it
+                        missing = verdict.unmet(
+                            requirements,
+                            mechanically_unmet(
+                                requirements, self.ledger.changed_files,
+                                self.ledger.unified_diff(),
+                            ),
+                        )
                         if missing:
                             coverage_passes += 1
                             self.recorder.event(
@@ -814,7 +824,12 @@ class ChatSession:
                 build_evidence(self.ledger.unified_diff(), self.ledger.changed_files, []),
                 self.usage,
             )
-            return True, not verdict.unmet([requirement])
+            return True, not verdict.unmet(
+                [requirement],
+                mechanically_unmet(
+                    [requirement], self.ledger.changed_files, self.ledger.unified_diff()
+                ),
+            )
 
         temperatures = _search_temperatures(
             self.settings.temperature, self.settings.search_candidates

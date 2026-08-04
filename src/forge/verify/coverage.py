@@ -143,8 +143,12 @@ class CoverageItem(BaseModel):
 class CoverageVerdict(BaseModel):
     items: list[CoverageItem] = Field(default_factory=list)
 
-    def unmet(self, requirements: list[Requirement]) -> list[Requirement]:
-        missed = {item.id for item in self.items if not item.met}
+    def unmet(
+        self, requirements: list[Requirement], also: set[int] | None = None
+    ) -> list[Requirement]:
+        """Requirements the judge marked unmet, plus any `also` decided
+        mechanically — evidence overrides opinion, never the other way."""
+        missed = {item.id for item in self.items if not item.met} | (also or set())
         return [r for r in requirements if r.id in missed]
 
 
@@ -177,6 +181,39 @@ def build_evidence(diff: str, changed_files: list[str], commands: list[str]) -> 
             clipped += "\n... [diff truncated]"
         sections.append("Unified diff of every change:\n" + clipped)
     return "\n\n".join(sections)
+
+
+_FILE_MENTION_RE = re.compile(r"\b([\w./-]+\.(?:py|pyw|js|ts|tsx|jsx|go|rs|java|json|toml))\b")
+_BACKTICK_RE = re.compile(r"`([A-Za-z_][\w.]*)`")
+
+
+def mechanically_unmet(
+    requirements: list[Requirement], changed_files: list[str], diff: str
+) -> set[int]:
+    """Requirements that are provably not done, decided without a model.
+
+    The coverage judge is an LLM reading a diff, and it is optimistic: asked
+    whether "register() must raise ValueError for a bad address" was
+    satisfied, it said yes while signup.py was untouched and absent from the
+    diff. Some of that judgement does not need a model at all — if a
+    requirement names a file and that file was never changed, it is not done,
+    whatever the judge thinks.
+
+    Deliberately narrow: only an explicitly named file counts, so a
+    requirement phrased without one is left to the judge."""
+    touched = {f.replace("\\", "/") for f in changed_files}
+    unmet: set[int] = set()
+    for requirement in requirements:
+        mentioned = set(_FILE_MENTION_RE.findall(requirement.text))
+        if not mentioned:
+            continue
+        # satisfied if ANY named file was actually changed
+        if not any(
+            name in touched or any(t.endswith("/" + name) for t in touched)
+            for name in mentioned
+        ):
+            unmet.add(requirement.id)
+    return unmet
 
 
 def assess(

@@ -453,3 +453,82 @@ def test_single_outcome_requests_still_skip_the_expensive_check():
         "make average() return 0.0 for an empty list",
     ]:
         assert not looks_multi_requirement(request), request
+
+
+# -- evidence overrides the judge -------------------------------------------------
+# Observed live on t3-wire-validator: validate_email was added correctly and
+# signup.py was never touched. The coverage judge — an LLM reading the diff —
+# declared the register() requirement met anyway, so no gap was reported and
+# the task shipped half done.
+
+
+def test_a_requirement_naming_an_untouched_file_is_unmet():
+    from forge.verify.coverage import mechanically_unmet
+
+    reqs = [
+        Requirement(id=1, text="a validate_email helper is added to validators.py"),
+        Requirement(id=2, text="register() in signup.py raises ValueError for a bad address"),
+    ]
+    assert mechanically_unmet(reqs, ["validators.py"], "") == {2}
+    assert mechanically_unmet(reqs, ["validators.py", "signup.py"], "") == set()
+
+
+def test_nested_paths_count_as_the_same_file():
+    from forge.verify.coverage import mechanically_unmet
+
+    reqs = [Requirement(id=1, text="signup.py rejects bad input")]
+    assert mechanically_unmet(reqs, ["src/pkg/signup.py"], "") == set()
+
+
+def test_requirements_naming_no_file_are_left_to_the_judge():
+    from forge.verify.coverage import mechanically_unmet
+
+    reqs = [Requirement(id=1, text="the returned total is discounted")]
+    assert mechanically_unmet(reqs, [], "") == set()
+
+
+def test_evidence_overrides_an_optimistic_judge():
+    """The judge says met; the file was never changed. Evidence wins."""
+    reqs = [Requirement(id=1, text="signup.py raises ValueError")]
+    verdict = CoverageVerdict(items=[CoverageItem(id=1, met=True, reason="looks fine")])
+    assert verdict.unmet(reqs) == []                      # judge alone
+    assert [r.id for r in verdict.unmet(reqs, {1})] == [1]  # with evidence
+
+
+def test_gate_catches_the_half_finished_cross_file_change(workspace):
+    """End to end: the helper lands, the caller is never wired, and the judge
+    is wrong about it. The turn must not end."""
+    (workspace / "validators.py").write_text("def v(n):\n    return True\n", "utf-8")
+    (workspace / "signup.py").write_text(
+        "from validators import v\n\n\ndef register(u):\n    return u\n", "utf-8"
+    )
+    optimistic = ChatMessage(role="assistant", content=(
+        '{"items": [{"id": 1, "met": true, "reason": "added"},'
+        ' {"id": 2, "met": true, "reason": "looks wired"}]}'
+    ))
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="append_to_file",
+            arguments={"path": "validators.py",
+                       "content": "def validate_email(a):\n    return '@' in a\n"})]),
+        ChatMessage(role="assistant", content="Added the helper."),
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "validate_email is added to validators.py"},'
+            ' {"id": 2, "text": "register() in signup.py raises ValueError for a bad address"}]}'
+        )),
+        optimistic,
+        # focused pass on the requirement the evidence flagged
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "signup.py",
+                       "content": "from validators import v, validate_email\n\n\n"
+                                  "def register(u):\n"
+                                  "    if not validate_email(u):\n"
+                                  "        raise ValueError('invalid email')\n"
+                                  "    return u\n"})]),
+        ChatMessage(role="assistant", content="Wired it into register."),
+        ChatMessage(role="assistant", content="Both parts done."),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="mech")
+    session.send("add validate_email to validators.py and use it in signup.py register()")
+    assert "raise ValueError" in (workspace / "signup.py").read_text(encoding="utf-8")
