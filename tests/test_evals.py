@@ -276,3 +276,26 @@ def test_ablation_presets_disable_real_settings(tmp_path):
     # every boolean gate is off; search_candidates is a count, not a flag
     assert not any(v for v in gates.values() if isinstance(v, bool)), gates
     assert set(ABLATIONS) >= {"all-gates", "no-gates", "no-edit-repair"}
+
+
+def test_every_task_is_actually_solvable(tmp_path):
+    """The guard that was missing. t2-rename-in-file scored 0/3 across many
+    runs and several rounds of diagnosis before the cause turned out to be
+    its own hidden check importing the stdlib `queue` instead of the
+    fixture's `taskqueue` — the task had been impossible the whole time, and
+    every failure read as an agent failure.
+
+    Each task now carries a reference solution (never shown to the agent).
+    Applying it must make the hidden checks pass."""
+    unsolvable = []
+    for task in SUITE:
+        assert task.solution, f"{task.id} has no reference solution"
+        workspace = materialize(task, tmp_path)
+        for relative, content in task.solution.items():
+            target = workspace / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        solved, output = score(task, workspace)
+        if not solved:
+            unsolvable.append(f"{task.id}:\n{output[:600]}")
+    assert not unsolvable, "tasks whose checks cannot be satisfied:\n" + "\n\n".join(unsolvable)

@@ -41,6 +41,7 @@ from forge.tools.filesystem import (
 )
 from forge.tools.git_tool import GitTool
 from forge.tools.github import GitHubFileTool, GitHubRepoTool
+from forge.tools.rename import RenameSymbolTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
@@ -147,6 +148,9 @@ class ExecutionLoop:
                 self.settings.syntax_gate,
                 self.settings.gate_edit_repair,
                 ladder=ladder,
+            ),
+            RenameSymbolTool(
+                self._guard, self.ledger, self.settings.syntax_gate, ladder=ladder
             ),
             DeleteFileTool(self._guard, self.ledger),
             ListDirTool(self._guard),

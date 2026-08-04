@@ -34,6 +34,13 @@ class Task:
     files: dict[str, str]  # fixture repo: relative path -> content
     check: str  # hidden pytest module, written to test_hidden.py
     tags: tuple[str, ...] = field(default_factory=tuple)
+    # A reference solution — the fixture as it should look when the task is
+    # done. Never shown to the agent; it exists so the suite can prove every
+    # task is SOLVABLE. Without it a broken check reads as an agent failure
+    # forever: t2-rename-in-file scored 0/3 across many runs, and several
+    # rounds of diagnosis, before the cause turned out to be its check
+    # importing the stdlib `queue` instead of the fixture's `taskqueue`.
+    solution: dict[str, str] = field(default_factory=dict)
 
 
 # --------------------------------------------------------------------------
@@ -66,6 +73,15 @@ _T1_ADD_FUNCTION = Task(
         "    from strings import titlecase\n"
         "    assert titlecase('ab cd') == 'Ab Cd'\n"
     ),
+    solution={
+        "strings.py": (
+            "import re\n\n\n"
+            "def titlecase(text):\n"
+            "    return re.sub(r'\\w+', lambda m: m.group(0).capitalize(), text)\n\n\n"
+            "def slugify(text):\n"
+            "    return re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')\n"
+        ),
+    },
     tags=("create", "regex"),
 )
 
@@ -95,6 +111,12 @@ _T1_FIX_BUG = Task(
         "def test_empty():\n"
         "    assert chunk([], 3) == []\n"
     ),
+    solution={
+        "batching.py": (
+            "def chunk(items, size):\n"
+            "    return [items[i:i + size] for i in range(0, len(items), size)]\n"
+        ),
+    },
     tags=("bugfix",),
 )
 
@@ -119,6 +141,14 @@ _T1_EDGE_CASE = Task(
         "def test_normal_unchanged():\n"
         "    assert average([1, 2, 3]) == 2\n"
     ),
+    solution={
+        "stats.py": (
+            "def average(values):\n"
+            "    if not values:\n"
+            "        return 0.0\n"
+            "    return sum(values) / len(values)\n"
+        ),
+    },
     tags=("bugfix", "edge-case"),
 )
 
@@ -162,6 +192,16 @@ _T2_TWO_PART = Task(
         "def test_checkout_without_discount():\n"
         "    assert checkout(ITEMS, 0) == 100\n"
     ),
+    solution={
+        "prices.py": (
+            "def subtotal(items):\n"
+            "    return sum(i['price'] * i['qty'] for i in items)\n\n\n"
+            "def apply_discount(amount, percent):\n"
+            "    return amount - amount * percent / 100\n\n\n"
+            "def checkout(items, percent):\n"
+            "    return apply_discount(subtotal(items), percent)\n"
+        ),
+    },
     tags=("multi-requirement", "same-file"),
 )
 
@@ -196,6 +236,18 @@ _T2_THREE_PART = Task(
         "def test_normal_still_works():\n"
         "    assert parse_port('443') == 443\n"
     ),
+    solution={
+        "netconf.py": (
+            "def parse_port(text):\n"
+            "    text = text.strip()\n"
+            "    if not text.isdigit():\n"
+            "        return None\n"
+            "    port = int(text)\n"
+            "    if port < 1 or port > 65535:\n"
+            "        raise ValueError('port out of range')\n"
+            "    return port\n"
+        ),
+    },
     tags=("multi-requirement", "same-file", "edge-case"),
 )
 
@@ -227,7 +279,7 @@ _T2_RENAME_LOCAL = Task(
         ),
     },
     check=(
-        "from queue import Queue, fill\n\n\n"
+        "from taskqueue import Queue, fill\n\n\n"
         "def test_renamed():\n"
         "    q = Queue()\n"
         "    assert hasattr(q, 'enqueue') and hasattr(q, 'dequeue')\n"
@@ -236,6 +288,26 @@ _T2_RENAME_LOCAL = Task(
         "    q = fill(Queue(), [1, 2, 3])\n"
         "    assert q.drain() == [1, 2, 3]\n"
     ),
+    solution={
+        "taskqueue.py": (
+            "class Queue:\n"
+            "    def __init__(self):\n"
+            "        self._items = []\n\n"
+            "    def enqueue(self, item):\n"
+            "        self._items.append(item)\n\n"
+            "    def dequeue(self):\n"
+            "        return self._items.pop(0)\n\n"
+            "    def drain(self):\n"
+            "        out = []\n"
+            "        while self._items:\n"
+            "            out.append(self.dequeue())\n"
+            "        return out\n\n\n"
+            "def fill(queue, values):\n"
+            "    for value in values:\n"
+            "        queue.enqueue(value)\n"
+            "    return queue\n"
+        ),
+    },
     tags=("multi-requirement", "same-file", "refactor"),
 )
 
@@ -288,6 +360,28 @@ _T3_ADD_AND_WIRE = Task(
         "    user = signup.register('bob', 'bob@example.com')\n"
         "    assert user['username'] == 'bob'\n"
     ),
+    solution={
+        "validators.py": (
+            "def validate_username(name):\n"
+            "    return bool(name) and name.isalnum()\n\n\n"
+            "def validate_email(address):\n"
+            "    if address.count('@') != 1:\n"
+            "        return False\n"
+            "    local, _, domain = address.partition('@')\n"
+            "    return bool(local) and '.' in domain\n"
+        ),
+        "signup.py": (
+            "from validators import validate_email, validate_username\n\n"
+            "USERS = []\n\n\n"
+            "def register(username, email):\n"
+            "    if not validate_username(username):\n"
+            "        raise ValueError('invalid username')\n"
+            "    if not validate_email(email):\n"
+            "        raise ValueError('invalid email')\n"
+            "    USERS.append({'username': username, 'email': email})\n"
+            "    return USERS[-1]\n"
+        ),
+    },
     tags=("cross-file", "import"),
 )
 
@@ -325,6 +419,22 @@ _T3_RENAME = Task(
         "    assert cart_total({'items': ITEMS}) == 6\n"
         "    assert summary([{'items': ITEMS}]) == [6]\n"
     ),
+    solution={
+        "engine.py": (
+            "def compute_total(items):\n"
+            "    return sum(i['price'] * i['qty'] for i in items)\n"
+        ),
+        "cart.py": (
+            "from engine import compute_total\n\n\n"
+            "def cart_total(cart):\n"
+            "    return compute_total(cart['items'])\n"
+        ),
+        "report.py": (
+            "import engine\n\n\n"
+            "def summary(orders):\n"
+            "    return [engine.compute_total(o['items']) for o in orders]\n"
+        ),
+    },
     tags=("cross-file", "refactor"),
 )
 
@@ -383,6 +493,19 @@ _T4_FAILING_TEST = Task(
         "    inv.remove('pen', 5)\n"
         "    assert inv.count('pen') == 0\n"
     ),
+    solution={
+        "inventory.py": (
+            "class Inventory:\n"
+            "    def __init__(self):\n"
+            "        self._items = {}\n\n"
+            "    def add(self, name, qty=1):\n"
+            "        self._items[name] = self._items.get(name, 0) + qty\n\n"
+            "    def remove(self, name, qty=1):\n"
+            "        self._items[name] = max(self._items.get(name, 0) - qty, 0)\n\n"
+            "    def count(self, name):\n"
+            "        return self._items.get(name, 0)\n"
+        ),
+    },
     tags=("debug", "run-tests"),
 )
 
@@ -414,6 +537,22 @@ _T4_FEATURE = Task(
         "def test_upper_flag():\n"
         "    assert main(['bob', '--upper']) == 'HELLO, BOB'\n"
     ),
+    solution={
+        "app.py": (
+            "import argparse\n\n\n"
+            "def greet(name):\n"
+            "    return f'hello, {name}'\n\n\n"
+            "def build_parser():\n"
+            "    parser = argparse.ArgumentParser()\n"
+            "    parser.add_argument('name')\n"
+            "    parser.add_argument('--upper', action='store_true')\n"
+            "    return parser\n\n\n"
+            "def main(argv=None):\n"
+            "    args = build_parser().parse_args(argv)\n"
+            "    message = greet(args.name)\n"
+            "    return message.upper() if args.upper else message\n"
+        ),
+    },
     tags=("feature", "cli"),
 )
 

@@ -39,6 +39,7 @@ from forge.tools.filesystem import (
 )
 from forge.tools.git_tool import GitTool
 from forge.tools.github import GitHubFileTool, GitHubRepoTool
+from forge.tools.rename import RenameSymbolTool
 from forge.tools.retrieval_tool import SearchCodeTool
 from forge.tools.search import GlobTool, GrepTool
 from forge.tools.terminal import PowerShellTool, RunCommandTool
@@ -110,6 +111,8 @@ Example — read, then edit:
   whitespace and blank lines.
 - Adding something new to a file? Use append_to_file with just the new code.
   Never call edit_file with an empty old_string — it cannot append.
+- RENAMING anything? Use rename_symbol. edit_file matches text and will hit a
+  call site instead of the definition, leaving the code half-renamed.
 - edit_file failed twice on one file: read it, then write_file the COMPLETE
   corrected content.
 - Your new code uses a symbol: that file must import or define it — tests too.
@@ -120,7 +123,8 @@ Example — read, then edit:
   web_search it and fetch_url the best result.
 
 ## Tools available
-read_file · write_file · append_to_file · edit_file · delete_file ·
+read_file · write_file · append_to_file · edit_file · rename_symbol ·
+delete_file ·
 list_dir · run_command ·
 run_powershell (full PowerShell on Windows: file ops, processes, env,
 package managers) · grep · find_files · search_code (by meaning) ·
@@ -381,6 +385,9 @@ class ChatSession:
                 self.settings.syntax_gate,
                 self.settings.gate_edit_repair,
                 ladder=ladder,
+            ),
+            RenameSymbolTool(
+                self._guard, self.ledger, self.settings.syntax_gate, ladder=ladder
             ),
             DeleteFileTool(self._guard, self.ledger),
             ListDirTool(self._guard),
