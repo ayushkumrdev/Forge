@@ -12,6 +12,11 @@ from typing import Any, Literal
 
 PermissionMode = Literal["auto", "ask"]
 
+# Every denial message starts with this. It lets callers tell "the user said
+# no" apart from "the tool failed" — a distinction that matters, because
+# Forge must never push the model to retry something the user refused.
+DENIAL_PREFIX = "Permission denied by the user"
+
 # approver(tool_name, human-readable detail) -> True to allow
 Approver = Callable[[str, str], bool]
 
@@ -38,6 +43,6 @@ class PermissionPolicy:
         if self._approver(tool_name, detail):
             return None
         return (
-            f"Permission denied by the user for {tool_name}. Do not retry the "
+            f"{DENIAL_PREFIX} for {tool_name}. Do not retry the "
             "same call; ask the user how to proceed or try a different approach."
         )

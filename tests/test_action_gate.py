@@ -353,3 +353,73 @@ def test_timeout_reports_what_was_already_changed(workspace):
     )
     reply = session.send("add a thing")
     assert "a.py" in reply  # the user is told what landed before the cutoff
+
+
+def test_giving_up_after_a_failed_write_is_bounced(workspace):
+    """The paste/promise detectors only catch deflection SHAPES. Observed
+    live: one edit_file failed on a bad old_string, the model replied in
+    plain prose, and the turn ended with the file untouched — no fence, no
+    promise, nothing for the gate to catch."""
+    (workspace / "app.py").write_text("x = 1\n", encoding="utf-8")
+    llm = MockLLMClient(
+        [
+            ChatMessage(
+                role="assistant",
+                tool_calls=[ToolCall(name="edit_file", arguments={
+                    "path": "app.py", "old_string": "not present", "new_string": "y"})],
+            ),
+            ChatMessage(role="assistant", content="I could not locate that text."),
+            ChatMessage(
+                role="assistant",
+                tool_calls=[ToolCall(name="write_file", arguments={
+                    "path": "app.py", "content": "x = 2\n"})],
+            ),
+            ChatMessage(role="assistant", content="Changed x to 2 in app.py."),
+        ]
+    )
+    session = _session(workspace, llm)
+    reply = session.send("change x to 2 in app.py")
+    assert reply == "Changed x to 2 in app.py."
+    assert (workspace / "app.py").read_text(encoding="utf-8") == "x = 2\n"
+    assert any("nothing was changed" in m.content for m in session.history)
+
+
+def test_a_user_denial_is_never_argued_with(workspace):
+    """A denial is the USER saying no. Nudging the model to retry would have
+    Forge arguing with its own permission prompt."""
+    from forge.safety.permissions import PermissionPolicy
+
+    (workspace / "app.py").write_text("x = 1\n", encoding="utf-8")
+    llm = MockLLMClient(
+        [
+            ChatMessage(
+                role="assistant",
+                tool_calls=[ToolCall(name="write_file", arguments={
+                    "path": "app.py", "content": "x = 2\n"})],
+            ),
+            ChatMessage(role="assistant", content="Okay, I won't change it."),
+        ]
+    )
+    policy = PermissionPolicy("ask", lambda tool, detail: False)  # always deny
+    session = ChatSession(workspace, llm, policy=policy, session_id="denied")
+    reply = session.send("change x to 2 in app.py")
+    assert reply == "Okay, I won't change it."
+    assert len(llm.requests) == 2  # accepted; not pushed to retry
+    assert not any("Recover NOW" in m.content for m in session.history)
+    assert (workspace / "app.py").read_text(encoding="utf-8") == "x = 1\n"
+
+
+def test_a_clean_no_op_answer_is_still_allowed(workspace):
+    """No failed write means nothing to recover from — an honest 'already
+    correct' answer must not be bounced."""
+    (workspace / "app.py").write_text("x = 2\n", encoding="utf-8")
+    llm = MockLLMClient(
+        [
+            ChatMessage(role="assistant", tool_calls=[ToolCall(
+                name="read_file", arguments={"path": "app.py"})]),
+            ChatMessage(role="assistant", content="x is already 2; no change needed."),
+        ]
+    )
+    session = _session(workspace, llm)
+    assert session.send("change x to 2 in app.py") == "x is already 2; no change needed."
+    assert len(llm.requests) == 2

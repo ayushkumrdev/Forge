@@ -24,7 +24,7 @@ from forge.llm.base import ChatMessage, LLMClient, Usage
 from forge.llm.json_utils import looks_like_tool_call
 from forge.memory.store import MemoryStore
 from forge.safety.guard import SafetyGuard
-from forge.safety.permissions import PermissionPolicy
+from forge.safety.permissions import DENIAL_PREFIX, PermissionPolicy
 from forge.telemetry import Recorder
 from forge.tools.base import ToolRegistry
 from forge.tools.changes import ChangeLedger
@@ -261,6 +261,15 @@ _PASTED_CODE_NUDGE = (
     "run_command. Do not reply in plain text until the change is actually in "
     "the repository files."
 )
+_GAVE_UP_NUDGE = (
+    "You were asked to change something and nothing was changed — your last "
+    "attempt failed and you stopped:\n{failure}\n\nRecover NOW. Call read_file "
+    "on the file to see its real current content, then make the change with "
+    "the right tool: rename_symbol for a rename, append_to_file to add "
+    "something new, edit_file with text copied EXACTLY from what you just "
+    "read, or write_file with the complete corrected file. If you genuinely "
+    "believe no change is needed, say that explicitly and explain why."
+)
 _PROMISE_NUDGE = (
     "You described what you would do instead of doing it. Execute it NOW with "
     "tool calls (read_file, edit_file, write_file, run_command). Do not "
@@ -447,6 +456,7 @@ class ChatSession:
         action_turn = is_action_request(user_text)
         turn_mutated = False
         turn_ran_command = False
+        last_write_failure = ""
         corrections = 0
         nudged = False
         genius_checked = False
@@ -529,7 +539,18 @@ class ChatSession:
                 # caught. Only the CORRECTION is gated.
                 violation, correction = None, None
                 if action_turn:
-                    if not turn_mutated and self._deflection(content):
+                    if not turn_mutated and last_write_failure and not self._deflection(content):
+                        # Asked for a change, every write attempt failed, and
+                        # the model simply stopped. The paste/promise
+                        # detectors do not fire on a plain "I could not do
+                        # it", so the turn used to end with nothing done.
+                        violation = "gave_up_after_failure"
+                        correction = (
+                            _GAVE_UP_NUDGE.format(failure=last_write_failure)
+                            if self.settings.gate_action
+                            else None
+                        )
+                    elif not turn_mutated and self._deflection(content):
                         violation = (
                             "pasted_code"
                             if _CODE_FENCE_RE.search(content)
@@ -684,8 +705,14 @@ class ChatSession:
             for call in message.tool_calls:
                 self.recorder.event("chat", "tool_call", tool=call.name, arguments=call.arguments)
                 result = self.registry.execute(call.name, call.arguments)
-                if result.ok and call.name in _FILE_MUTATING_TOOLS:
-                    turn_mutated = True
+                if call.name in _FILE_MUTATING_TOOLS:
+                    if result.ok:
+                        turn_mutated = True
+                    elif not (result.error or "").startswith(DENIAL_PREFIX):
+                        # A denial is the USER saying no, not a failure to
+                        # recover from. Nudging the model to retry it would
+                        # have Forge arguing with its own permission prompt.
+                        last_write_failure = f"{call.name}: {result.error or ''}"[:400]
                 if result.ok and call.name in ("run_command", "run_powershell", "run_tests"):
                     turn_ran_command = True
                     command = str(call.arguments.get("command", "run_tests"))[:200]
