@@ -148,7 +148,11 @@ def run_task(
     root: Path,
     seed: int = 0,
 ) -> TaskResult:
-    workspace = materialize(task, root)
+    # one workspace per seed: they used to share a directory that was wiped
+    # on each run, so only the last seed's trace survived — and the trace is
+    # the only thing that says WHY a run failed. Twice now a diagnosis has
+    # had to wait for a whole suite to be re-run because of it.
+    workspace = materialize(task, root / f"seed-{seed}")
     started = time.monotonic()
     events: list[dict[str, Any]] = []
     result = TaskResult(task_id=task.id, tier=task.tier, solved=False, seed=seed)

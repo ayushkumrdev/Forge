@@ -319,3 +319,18 @@ def test_empty_step_is_unobserved_without_focused_steps():
     """Unobserved must stay None, never 0 — a turn with no plan-first steps
     has not demonstrated anything about them."""
     assert metrics_from_events([{"kind": "turn_finished"}]).empty_step is None
+
+
+def test_each_seed_gets_its_own_workspace_so_traces_survive(tmp_path):
+    """The trace is the only artifact that says WHY a run failed, and seeds
+    used to share one directory that was wiped on every run."""
+    task = tasks(ids=["t1-add-function"])[0]
+    seen = set()
+    for seed in (0, 1, 2):
+        workspace = materialize(task, tmp_path / f"seed-{seed}")
+        (workspace / "trace.jsonl").write_text(f"seed {seed}\n", encoding="utf-8")
+        seen.add(workspace)
+    assert len(seen) == 3
+    for seed in (0, 1, 2):
+        trace = tmp_path / f"seed-{seed}" / task.id / "trace.jsonl"
+        assert trace.read_text(encoding="utf-8").strip() == f"seed {seed}"
