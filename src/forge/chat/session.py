@@ -566,11 +566,7 @@ class ChatSession:
                         self.history.append(message.model_copy(update={"content": content}))
                         self.history.append(
                             ChatMessage(
-                                role="user",
-                                content="The change is incomplete — these calls now "
-                                "point at something that no longer exists:\n"
-                                + "\n".join(f"- {s}" for s in stale)
-                                + "\n\nFix every one of them now with edit_file.",
+                                role="user", content=self._structural_nudge(stale)
                             )
                         )
                         continue
@@ -709,6 +705,36 @@ class ChatSession:
         if self.effort == "genius":
             return int(base * 1.5)
         return base
+
+    def _structural_nudge(self, problems: list[str]) -> str:
+        """Name the breakage AND show the file as it is right now.
+
+        Telling the model what is wrong was not enough: it answered with
+        edit_file calls whose old_string no longer existed, because it was
+        working from its memory of the file rather than its current contents.
+        The same principle as every other grounding message here — hand it the
+        real text instead of asking it to recall."""
+        files = sorted({p.split(":", 1)[0] for p in problems})
+        sections = []
+        for name in files[:2]:
+            try:
+                content = (self.workspace / name).read_text(
+                    encoding="utf-8-sig", errors="replace"
+                )
+            except OSError:
+                continue
+            if len(content) > 4_000:
+                content = content[:4_000] + "\n... [truncated]"
+            sections.append(f"--- {name} as it is NOW ---\n{content}")
+        listing = "\n".join(f"- {p}" for p in problems)
+        return (
+            "The change is incomplete — this code now refers to something that "
+            f"does not exist:\n{listing}\n\n"
+            + "\n\n".join(sections)
+            + "\n\nFix every one of them now, copying old_string EXACTLY from "
+            "the content above. If an edit fails twice, use write_file with the "
+            "complete corrected file instead."
+        )
 
     @staticmethod
     def _issue_without_line(problem: str) -> str:

@@ -380,7 +380,7 @@ def test_dangling_check_runs_at_turn_end(tmp_path):
     reply = session.send("rename push to enqueue")
     assert reply == "Updated every caller."
     assert "queue.push(" not in (repo / "q.py").read_text(encoding="utf-8")
-    assert any("no longer exists" in m.content for m in session.history)
+    assert any("does not exist" in m.content for m in session.history)
 
 
 # -- undefined self-calls: the mirror of a missed caller --------------------------
@@ -614,7 +614,7 @@ def test_structural_check_reruns_after_a_partial_fix(tmp_path):
     assert reply == "Restored self too."
     assert "def enqueue(self, item)" in (repo / "q.py").read_text(encoding="utf-8")
     # it took two corrective rounds, i.e. the check ran more than once
-    prompts = [m.content for m in session.history if "no longer exists" in m.content]
+    prompts = [m.content for m in session.history if "does not exist" in m.content]
     assert len(prompts) == 2
 
 
@@ -635,7 +635,7 @@ def test_structural_check_is_bounded(tmp_path):
     llm = MockLLMClient([write, stuck, write, stuck, write, stuck, write, stuck])
     session = ChatSession(repo, llm, ForgeSettings(), session_id="bounded")
     assert session.send("rename push to enqueue") == "I renamed it."
-    prompts = [m.content for m in session.history if "no longer exists" in m.content]
+    prompts = [m.content for m in session.history if "does not exist" in m.content]
     assert len(prompts) == 2  # bounded at _MAX_STRUCTURAL_PASSES
 
 
@@ -669,3 +669,33 @@ def test_a_plain_receiver_is_still_checked():
     before = "class A:\n    def push(self, v): pass\n\n\ndef fill(q, v):\n    q.push(v)\n"
     after = before.replace("def push(self, v)", "def enqueue(self, v)")
     assert dangling_reference_errors(before, after)
+
+
+def test_structural_nudge_shows_the_file_as_it_is_now(tmp_path):
+    """Naming the breakage was not enough: the model answered with edit_file
+    calls whose old_string no longer existed, working from memory of the file.
+    The nudge now hands it the real current text."""
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.mock import MockLLMClient
+
+    repo = _repo(tmp_path)
+    (repo / "q.py").write_text("class Q:\n    def go(self):\n        return 1\n", "utf-8")
+    session = ChatSession(repo, MockLLMClient([]), ForgeSettings(), session_id="nudge")
+    nudge = session._structural_nudge(["q.py: line 2: 'push' is still called here"])
+    assert "'push' is still called here" in nudge
+    assert "q.py as it is NOW" in nudge
+    assert "def go(self):" in nudge          # the actual current content
+    assert "copying old_string EXACTLY" in nudge
+    assert "write_file with the" in nudge    # the escape hatch
+
+
+def test_structural_nudge_survives_a_missing_file(tmp_path):
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.mock import MockLLMClient
+
+    repo = _repo(tmp_path)
+    session = ChatSession(repo, MockLLMClient([]), ForgeSettings(), session_id="nudge2")
+    nudge = session._structural_nudge(["ghost.py: line 1: 'x' is still called here"])
+    assert "'x' is still called here" in nudge  # still reports the problem
