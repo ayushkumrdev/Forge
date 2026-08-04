@@ -529,12 +529,12 @@ class ChatSession:
                                     requirement,
                                     done,
                                     note="An earlier attempt at THIS step changed "
-                                    "nothing. The other steps listed above are "
-                                    "already done and are not your job — this one "
-                                    "is still outstanding, whatever the file looks "
-                                    "like. Read the file, make this change with a "
-                                    "tool, and do not reply until the tool has "
-                                    "reported it.",
+                                    "nothing. It is still outstanding — other "
+                                    "edits already in the file were made for a "
+                                    "different step and do not count as this one. "
+                                    "Read the file, make this change with a tool, "
+                                    "and do not reply until the tool has reported "
+                                    "it.",
                                 )
                                 or changed
                             )
