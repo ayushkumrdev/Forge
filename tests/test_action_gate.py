@@ -442,7 +442,8 @@ def test_noun_heavy_words_do_not_arm_the_gate():
 
     for text in [
         "the import graph is built at startup",
-        "the cache is stale after a rename",
+        "the cache is warmed on the first request",
         "this document describes the protocol",
+        "the export runs nightly",
     ]:
         assert not is_action_request(text), text
