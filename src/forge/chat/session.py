@@ -496,11 +496,34 @@ class ChatSession:
                         break
                     # extra compute, if the user is paying for it, goes into
                     # each step rather than into one big attempt
-                    changed = (
-                        self._search_requirement(requirement, done)
-                        if self.settings.search_candidates > 1
-                        else self._focused_pass(requirement, done)
-                    )
+                    if self.settings.search_candidates > 1:
+                        changed = self._search_requirement(requirement, done)
+                    else:
+                        changed = self._focused_pass(requirement, done)
+                        # A step that names a file and leaves it untouched
+                        # provably did nothing. Costs no model call to notice,
+                        # and a second clean context often just works — far
+                        # cheaper than discovering the gap at turn end, when
+                        # the context is already polluted.
+                        if mechanically_unmet(
+                            [requirement],
+                            self.ledger.changed_files,
+                            self.ledger.unified_diff(),
+                        ):
+                            self.recorder.event(
+                                "chat", "plan_first_retry", output=requirement.text[:160]
+                            )
+                            changed = (
+                                self._focused_pass(
+                                    requirement,
+                                    done,
+                                    note="A previous attempt at this changed nothing "
+                                    "in the file it names. Read that file, then make "
+                                    "the edit — do not reply until the tool has "
+                                    "reported the change.",
+                                )
+                                or changed
+                            )
                     if changed:
                         turn_mutated = True
                     done.append(requirement)
@@ -827,19 +850,31 @@ class ChatSession:
         # with an old_string that no longer exists and never recovers. Point
         # it at the tool that does the whole rename in one correct operation.
         rename_shaped = any("removed or renamed" in p for p in problems)
-        remedy = (
-            "This is a half-finished rename. Use rename_symbol for it — one "
-            "call per name, and it updates the definition AND every reference "
-            "together:\n"
-            '{"name": "rename_symbol", "arguments": {"path": "<file>", '
-            '"old_name": "<old>", "new_name": "<new>"}}\n'
-            "Do NOT use edit_file for a rename; it matches text and will hit a "
-            "call site instead of the definition."
-            if rename_shaped
-            else "Fix every one of them now, copying old_string EXACTLY from the "
-            "content above. If an edit fails twice, use write_file with the "
-            "complete corrected file instead."
-        )
+        # A narrowed signature is not a thing to "fix" — it is a change nobody
+        # asked for, and the remedy is to put it back.
+        signature_shaped = any("existing call" in p for p in problems)
+        if rename_shaped:
+            remedy = (
+                "This is a half-finished rename. Use rename_symbol for it — one "
+                "call per name, and it updates the definition AND every reference "
+                "together:\n"
+                '{"name": "rename_symbol", "arguments": {"path": "<file>", '
+                '"old_name": "<old>", "new_name": "<new>"}}\n'
+                "Do NOT use edit_file for a rename; it matches text and will hit a "
+                "call site instead of the definition."
+            )
+        elif signature_shaped:
+            remedy = (
+                "Restore the parameter list exactly as it was — the user did not "
+                "ask for it to change, and code outside this file calls it. Keep "
+                "the behaviour you added, but put it in the body."
+            )
+        else:
+            remedy = (
+                "Fix every one of them now, copying old_string EXACTLY from the "
+                "content above. If an edit fails twice, use write_file with the "
+                "complete corrected file instead."
+            )
         return (
             "The change is incomplete — this code now refers to something that "
             f"does not exist:\n{listing}\n\n"
@@ -946,6 +981,7 @@ class ChatSession:
         done: list[Requirement],
         budget: int = 6,
         temperature: float | None = None,
+        note: str = "",
     ) -> bool:
         """Run one requirement as a short task with a CLEAN context.
 
@@ -956,7 +992,7 @@ class ChatSession:
         a file was changed."""
         self.recorder.event("chat", "focused_pass", output=requirement.text[:200])
         history: list[ChatMessage] = [
-            ChatMessage(role="user", content=focused_prompt(requirement, done))
+            ChatMessage(role="user", content=focused_prompt(requirement, done, note))
         ]
         changed = False
         for _ in range(budget):
@@ -975,6 +1011,29 @@ class ChatSession:
                 return changed
             self.usage.add(response.usage)
             message = recover_inline_tool_call(response.message, self.registry.names())
+            if (
+                not message.tool_calls
+                and message.content
+                and self.settings.gate_constrained_retry
+                and looks_like_tool_call(message.content, self.registry.names())
+            ):
+                # The main loop has had this since early on; the focused pass
+                # did not, so a step whose call came out as prose simply ended
+                # having changed nothing — and a focused pass is exactly where
+                # that is most expensive, because it is the whole step.
+                retried = constrained_tool_retry(
+                    self.llm,
+                    [ChatMessage(role="system", content=self._system), *history],
+                    self.registry.specs(),
+                    self.registry.names(),
+                )
+                if retried is not None:
+                    message, retry_usage = retried
+                    self.usage.add(retry_usage)
+                    self.recorder.event(
+                        "chat", "focused_constrained_retry",
+                        tool=message.tool_calls[0].name,
+                    )
             if not message.tool_calls:
                 break
             history.append(message)

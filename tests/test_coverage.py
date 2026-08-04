@@ -5,7 +5,7 @@ import pytest
 
 from forge.chat.session import ChatSession
 from forge.config import ForgeSettings
-from forge.llm.base import ChatMessage, ToolCall
+from forge.llm.base import ChatMessage, LLMResponse, ToolCall
 from forge.llm.mock import MockLLMClient
 from forge.verify.coverage import (
     CoverageItem,
@@ -678,3 +678,124 @@ def test_a_requirement_that_asks_for_a_new_argument_is_exempt():
     """The warning must not fight a signature change the user asked for."""
     req = Requirement(id=3, text="register() takes a new strict argument that validates input")
     assert "Keep the existing function signature" not in focused_prompt(req, [])
+
+
+def test_a_focused_step_that_touched_nothing_is_retried_once(workspace):
+    """No model call is needed to know a step did nothing: the requirement
+    names a file, and the file is untouched."""
+    (workspace / "signup.py").write_text("def register(name):\n    return name\n", "utf-8")
+    (workspace / "validators.py").write_text("def check(x):\n    return True\n", "utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "validators.py gains validate_email"},'
+            ' {"id": 2, "text": "signup.py calls validate_email in register"}]}'
+        )),
+        # step 1 lands
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="append_to_file",
+            arguments={"path": "validators.py",
+                       "content": "\n\ndef validate_email(a):\n    return True\n"})]),
+        ChatMessage(role="assistant", content="Added it."),
+        # step 2 talks instead of editing — signup.py stays untouched
+        ChatMessage(role="assistant", content="You should call validate_email in register."),
+        # the retry gets a clean context and actually does it
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "signup.py",
+                       "content": "from validators import validate_email\n\n\n"
+                                  "def register(name):\n"
+                                  "    validate_email(name)\n"
+                                  "    return name\n"})]),
+        ChatMessage(role="assistant", content="Wired it in."),
+        ChatMessage(role="assistant", content="Both parts are done."),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": true, "reason": "d"}]}'
+        )),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="pfr")
+    session.send("add validate_email to validators.py and call it in signup.py register")
+    assert "validate_email(name)" in (workspace / "signup.py").read_text(encoding="utf-8")
+    assert any(
+        "changed nothing" in m.content
+        for req in llm.requests for m in req
+    )
+
+
+def test_a_step_that_landed_is_not_retried(workspace):
+    (workspace / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "b.py").write_text("y = 1\n", encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "a.py sets x to 2"},'
+            ' {"id": 2, "text": "b.py sets y to 2"}]}'
+        )),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "a.py", "content": "x = 2\n"})]),
+        ChatMessage(role="assistant", content="Done a."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "b.py", "content": "y = 2\n"})]),
+        ChatMessage(role="assistant", content="Done b."),
+        ChatMessage(role="assistant", content="Both set."),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": true, "reason": "d"}]}'
+        )),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="pfr2")
+    session.send("set x to 2 in a.py and set y to 2 in b.py")
+    assert not any(
+        "changed nothing" in m.content for req in llm.requests for m in req
+    )
+
+
+def test_a_focused_step_recovers_a_mangled_tool_call(workspace):
+    """The main loop has always had constrained retry; the focused pass did
+    not, so a call that came out as broken JSON ended the whole step having
+    changed nothing."""
+    (workspace / "q.py").write_text("def push():\n    pass\n", encoding="utf-8")
+
+    class ConstrainedLLM(MockLLMClient):
+        def chat(self, messages, tools=None, temperature=None, on_token=None, format=None):
+            focused = any("Do exactly this one thing" in m.content for m in messages)
+            if format is not None and focused:  # the grammar-constrained re-ask
+                return LLMResponse(message=ChatMessage(
+                    role="assistant",
+                    tool_calls=[ToolCall(name="rename_symbol", arguments={
+                        "path": "q.py", "old_name": "push", "new_name": "enqueue"})],
+                ))
+            return super().chat(messages, tools, temperature, on_token=on_token, format=format)
+
+    llm = ConstrainedLLM([
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "push is renamed to enqueue"},'
+            ' {"id": 2, "text": "callers use enqueue"}]}'
+        )),
+        # the call comes back as truncated JSON that cannot be parsed
+        ChatMessage(role="assistant", content=(
+            '{"name": "rename_symbol", "arguments": {"path": "q.py", "old_name": "push"'
+        )),
+        ChatMessage(role="assistant", content="Renamed."),
+        ChatMessage(role="assistant", content="Nothing more to do."),
+        ChatMessage(role="assistant", content="All renamed."),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": true, "reason": "d"}]}'
+        )),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="fcr")
+    session.send("rename push to enqueue and update the callers")
+    assert "def enqueue" in (workspace / "q.py").read_text(encoding="utf-8")
+
+
+def test_the_rename_example_is_a_complete_recoverable_tool_call():
+    """A bare arguments object is unrecoverable — extract_tool_call needs the
+    name — and the model copies whatever shape it is shown."""
+    from forge.llm.json_utils import extract_tool_call
+
+    req = Requirement(id=1, text="push is renamed to enqueue")
+    example = focused_prompt(req, []).split("\n")
+    payload = next(line for line in example if line.startswith('{"name"'))
+    call = extract_tool_call(payload)
+    assert call is not None and call.name == "rename_symbol"
+    assert call.arguments["old_name"] == "push"

@@ -278,11 +278,16 @@ def _how_to_do_it(requirement: Requirement) -> str:
     pair = rename_pair(requirement.text)
     if pair is not None:
         old, new = pair
+        # The example must be a COMPLETE call, name and all. An earlier
+        # version showed only the arguments object; the model echoed that
+        # shape as text, inline-call recovery could not read it without a
+        # name, and the step ended having done nothing at all.
         return (
             "Use the rename_symbol tool for this — one call renames the "
             "definition and every reference to it, and it will not touch "
-            "unrelated methods that happen to share the name. Call it as "
-            f'{{"path": "<file>", "old_name": "{old}", "new_name": "{new}"}}. '
+            "unrelated methods that happen to share the name:\n"
+            f'{{"name": "rename_symbol", "arguments": {{"path": "<file>", '
+            f'"old_name": "{old}", "new_name": "{new}"}}}}\n'
             "Do NOT hand-edit the file with edit_file or write_file: text "
             "matching hits the wrong occurrences."
         )
@@ -309,14 +314,19 @@ def _how_to_do_it(requirement: Requirement) -> str:
     return how
 
 
-def focused_prompt(requirement: Requirement, done: list[Requirement]) -> str:
+def focused_prompt(
+    requirement: Requirement, done: list[Requirement], note: str = ""
+) -> str:
     """A single requirement, stated on its own with a clean slate.
 
     Nudging inside the original conversation failed in practice: by the time
     the gap is detected the history holds a dozen tool results and two
     corrections, and the model — told precisely what to do — re-ran the test
     command instead. The same model, given the same instruction as a short
-    focused task, has the whole budget and none of the noise."""
+    focused task, has the whole budget and none of the noise.
+
+    `note` carries a retry reason, and stays out of the requirement text so
+    the instruction the model reads is still exactly one thing."""
     context = ""
     if done:
         finished = "\n".join(f"- {r.text}" for r in done)
@@ -324,6 +334,8 @@ def focused_prompt(requirement: Requirement, done: list[Requirement]) -> str:
             "\n\nAlready done — do NOT redo these, and do not break them:\n"
             + finished
         )
+    if note:
+        context += f"\n\n{note}"
     return (
         f"Do exactly this one thing, nothing else:\n\n{requirement.text}"
         f"{context}\n\n"
