@@ -427,3 +427,29 @@ def test_decompose_prompt_forbids_overlap_and_platitudes():
     assert "rename INCLUDES updating" in _DECOMPOSE_SYSTEM
     assert "only restates quality" in _DECOMPOSE_SYSTEM
     assert "verify it works" in _DECOMPOSE_SYSTEM
+
+
+def test_multi_part_requests_without_a_conjunction_are_detected():
+    """An explicit "and"/"then" is not the only shape. Observed live on
+    t4-add-cli-flag: three requirements, no conjunction, so the coverage gate
+    never armed and the model shipped two of the three — it added the
+    uppercase logic and read args.upper without ever adding the flag to the
+    parser, so every run raised AttributeError."""
+    assert looks_multi_requirement(
+        "Add a --upper flag to the CLI in app.py: when passed, greet() output "
+        "is uppercased. Keep the default behaviour identical."
+    )
+    assert looks_multi_requirement(
+        "Make chunk() handle an empty list. Keep the existing behaviour for "
+        "non-empty input."
+    )
+
+
+def test_single_outcome_requests_still_skip_the_expensive_check():
+    for request in [
+        "fix the off-by-one in chunk()",
+        "add a slugify function to strings.py",
+        "delete the unused import",
+        "make average() return 0.0 for an empty list",
+    ]:
+        assert not looks_multi_requirement(request), request

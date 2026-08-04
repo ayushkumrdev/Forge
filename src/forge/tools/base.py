@@ -43,6 +43,37 @@ class Tool(ABC):
     def run(self, **kwargs: Any) -> ToolResult: ...
 
 
+def _argument_error(
+    tool: Tool, name: str, arguments: dict[str, Any], exc: TypeError
+) -> str:
+    """Say which argument is wrong, in the tool's own vocabulary.
+
+    The raw TypeError leaks a Python signature — "run() missing 1 required
+    positional argument: 'path'" — which tells the model nothing it can act
+    on. Every other failure in Forge grounds the model in what to do next;
+    this one should too."""
+    schema = tool.parameters or {}
+    required = list(schema.get("required") or [])
+    known = list((schema.get("properties") or {}).keys())
+    missing = [p for p in required if p not in arguments]
+    unexpected = [p for p in arguments if known and p not in known]
+
+    parts = []
+    if missing:
+        parts.append(f"missing required argument(s): {', '.join(missing)}")
+    if unexpected:
+        parts.append(f"unexpected argument(s): {', '.join(unexpected)}")
+    if not parts:
+        parts.append(str(exc))
+    return (
+        f"{name} was called incorrectly — {'; '.join(parts)}. "
+        f"It takes: {', '.join(known) if known else 'no arguments'}"
+        + (f" (required: {', '.join(required)})" if required else "")
+        + f". You sent: {', '.join(arguments) or 'nothing'}. Call it again with "
+        "every required argument."
+    )
+
+
 class ToolRegistry:
     def __init__(self, tools: list[Tool] | None = None, policy=None) -> None:
         self._tools: dict[str, Tool] = {}
@@ -81,6 +112,6 @@ class ToolRegistry:
         except SafetyViolation as exc:
             return ToolResult(ok=False, error=str(exc))
         except TypeError as exc:
-            return ToolResult(ok=False, error=f"Invalid arguments for {name}: {exc}")
+            return ToolResult(ok=False, error=_argument_error(tool, name, arguments, exc))
         except Exception as exc:  # noqa: BLE001 — tool crashes must not kill the run
             return ToolResult(ok=False, error=f"{type(exc).__name__}: {exc}")

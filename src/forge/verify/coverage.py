@@ -94,9 +94,35 @@ _MULTI_SIGNALS = re.compile(
 )
 
 
+# An explicit conjunction is not the only shape a multi-part request takes.
+# "Add a --upper flag: when passed, greet() output is uppercased. Keep the
+# default behaviour identical." has three requirements and not one "and" —
+# the coverage gate never armed, and the model shipped two of the three.
+_ACTION_VERB_RE = re.compile(
+    r"\b(?:add|fix|writ|creat|implement|refactor|chang|updat|remov|delet|"
+    r"renam|mov|install|build|convert|replac|improv|correct|patch|appl|"
+    r"extract|split|merg|migrat|upgrad|mak|ensur|handl|support|guard|wire|"
+    r"enabl|disabl|rework|rewrit|keep|return|raise|accept|reject|strip|"
+    r"uppercase|lowercase|print|log|call|use)(?:e|es|ed|ing|s)?\b",
+    re.IGNORECASE,
+)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.;:!?])\s+|\n+")
+
+
+def _action_clauses(request: str) -> int:
+    """How many separate clauses ask for something to happen."""
+    clauses = [c for c in _SENTENCE_SPLIT_RE.split(request) if c.strip()]
+    return sum(1 for clause in clauses if _ACTION_VERB_RE.search(clause))
+
+
 def looks_multi_requirement(request: str) -> bool:
-    """True when the request plausibly asks for more than one outcome."""
-    return _MULTI_SIGNALS.search(request) is not None
+    """True when the request plausibly asks for more than one outcome.
+
+    Cheap by design — it runs before the decomposition that costs an LLM
+    call, and a single-outcome request cannot be partially covered."""
+    if _MULTI_SIGNALS.search(request) is not None:
+        return True
+    return _action_clauses(request) >= 2
 
 
 class Requirement(BaseModel):

@@ -114,3 +114,32 @@ def test_fetch_is_read_only():
 @pytest.mark.parametrize("bad", ["ftp://x", "javascript:alert(1)", "not a url"])
 def test_fetch_various_bad_urls(bad):
     assert not FetchUrlTool().run(url=bad).ok
+
+
+def test_bad_tool_arguments_name_what_is_missing(workspace):
+    """A raw TypeError leaks a Python signature — "run() missing 1 required
+    positional argument: 'path'" — which the model cannot act on. Observed
+    live on t4-add-cli-flag. Every other failure in Forge grounds the model;
+    this one should too."""
+    from forge.chat.session import ChatSession
+    from forge.llm.mock import MockLLMClient
+
+    session = ChatSession(workspace, MockLLMClient([]), session_id="args")
+    result = session.registry.execute("edit_file", {"old_string": "a", "new_string": "b"})
+    assert not result.ok
+    assert "missing required argument(s): path" in result.error
+    assert "It takes: path, old_string, new_string" in result.error
+    assert "run()" not in result.error  # no Python signature leak
+
+
+def test_unexpected_tool_arguments_are_named(workspace):
+    from forge.chat.session import ChatSession
+    from forge.llm.mock import MockLLMClient
+
+    session = ChatSession(workspace, MockLLMClient([]), session_id="args2")
+    result = session.registry.execute(
+        "read_file", {"path": "x.py", "encoding": "utf-8", "mode": "r"}
+    )
+    assert not result.ok
+    assert "unexpected argument(s)" in result.error
+    assert "encoding" in result.error and "mode" in result.error
