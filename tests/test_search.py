@@ -189,3 +189,33 @@ def test_search_declines_on_a_workspace_too_large_to_snapshot(tmp_path, monkeypa
     for i in range(6):
         (tmp_path / f"f{i}.py").write_text(f"x = {i}\n", encoding="utf-8")
     assert search(tmp_path, lambda i, t: (True, True), [None, 0.5]) is None
+
+
+def test_restore_removes_empty_directories_a_candidate_created(tmp_path):
+    """An empty package directory is not harmless: it changes how imports
+    resolve, and it is litter in the tree the user sees."""
+    _seed(tmp_path)
+    snap = capture(tmp_path)
+    (tmp_path / "newpkg" / "sub").mkdir(parents=True)
+    (tmp_path / "newpkg" / "sub" / "mod.py").write_text("x\n", encoding="utf-8")
+    snap.restore()
+    assert not (tmp_path / "newpkg").exists()
+
+
+def test_restore_keeps_directories_that_were_always_there(tmp_path):
+    _seed(tmp_path)
+    snap = capture(tmp_path)
+    (tmp_path / "pkg" / "extra.py").write_text("x\n", encoding="utf-8")
+    snap.restore()
+    assert (tmp_path / "pkg" / "b.py").exists()  # original survives
+    assert not (tmp_path / "pkg" / "extra.py").exists()
+
+
+def test_restore_recreates_a_deleted_directory_tree(tmp_path):
+    import shutil
+
+    _seed(tmp_path)
+    snap = capture(tmp_path)
+    shutil.rmtree(tmp_path / "pkg")
+    snap.restore()
+    assert (tmp_path / "pkg" / "b.py").read_text(encoding="utf-8") == "y = 2\n"

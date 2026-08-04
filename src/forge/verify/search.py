@@ -66,6 +66,19 @@ class Snapshot:
             if path not in self.files:
                 with contextlib.suppress(OSError):
                     path.unlink()
+        self._remove_empty_dirs()
+
+    def _remove_empty_dirs(self) -> None:
+        """A losing candidate that created `pkg/sub/mod.py` leaves `pkg/sub`
+        behind once the file is deleted. Empty directories are harmless to
+        run but they are litter in the tree the user sees, and an empty
+        package directory can change how imports resolve."""
+        kept = {p.parent for p in self.files}
+        for directory in sorted(_walk_dirs(self.root), key=lambda d: -len(d.parts)):
+            if directory in kept or directory == self.root:
+                continue
+            with contextlib.suppress(OSError):
+                directory.rmdir()  # only succeeds when genuinely empty
 
     def changed_since(self) -> list[Path]:
         changed = []
@@ -96,6 +109,22 @@ def _walk(root: Path) -> list[Path]:
                 stack.append(entry)
             elif entry.is_file():
                 out.append(entry)
+    return out
+
+
+def _walk_dirs(root: Path) -> list[Path]:
+    out: list[Path] = []
+    stack = [root]
+    while stack:
+        current = stack.pop()
+        try:
+            entries = list(current.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.is_dir() and entry.name not in _SKIP_DIRS:
+                out.append(entry)
+                stack.append(entry)
     return out
 
 
