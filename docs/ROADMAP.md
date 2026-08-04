@@ -260,13 +260,39 @@ The instrument that turns "it works" into measured claims — see
   was inflated and the act-don't-tell gate would not fire on a model that
   merely re-ran the tests. It now counts only file-changing tools.
 
-## Milestone 20 — Execution isolation & scale
+## ✅ Milestone 20 — Bug hunt + execution-guided candidate search
+Overall TSR 23.8% -> 35.0%; tier 1 56% -> 83%; tier 2 0/6 -> 2/6, and 44.4%
+with search on (matched control 22.2%).
+- **Line endings**: every file Forge wrote on Windows was converted LF->CRLF,
+  so a one-line edit produced a whole-file diff. Writes now preserve the
+  file's own style. The single most damaging bug found, and it never showed
+  up in a metric.
+- **Syntax gate strengthened**: used `ast.parse`, which ACCEPTS return/break/
+  yield outside their block; now `compile()`.
+- **Indentation repair**: multi-line edit replacements arrived at column zero
+  and dedented code out of its function; now shifted to the anchor's depth,
+  kept only if the result verifies.
+- **`append_to_file`**: the missing affordance — the model reached for
+  edit_file with an empty old_string to append, was refused, and gave up.
+- **Undefined self-calls + missed callers**: a botched rename leaves either a
+  call to nothing or a caller pointing at the old name. Both decided from the
+  AST. Checked ONCE at turn end — gating per-write trapped the agent and cost
+  3/6 -> 1/6.
+- **Turn time limit** (`FORGE_MAX_TURN_SECONDS`): a turn was bounded in steps
+  but not time; one task ran 611 seconds.
+- **`verify/search.py`**: k attempts per requirement at diverse temperatures,
+  each isolated by a byte-exact snapshot, scored by requirement coverage and
+  the ladder, best kept. `FORGE_SEARCH_CANDIDATES`.
+- Decomposition fixed: it had been emitting overlapping and unfalsifiable
+  requirements, which made search *worse* than no search until repaired.
+
+## Milestone 21 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 21 — More agents & evaluation
+## Milestone 22 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness

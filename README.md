@@ -268,6 +268,8 @@ Everything is overridable via environment variables (or a `.env` file):
 | `FORGE_THINKER_MODEL` | (empty) | Second model that interprets intent before the coder acts |
 | `FORGE_VISION_MODEL` | (empty) | Multimodal model that lets Forge see images (e.g. `llava:7b`) |
 | `FORGE_EFFORT` | `smart` | Default effort level: `fast`, `smart`, or `genius` |
+| `FORGE_SEARCH_CANDIDATES` | `1` | Attempts per requirement; >1 enables candidate search |
+| `FORGE_MAX_TURN_SECONDS` | `300` | Wall-clock ceiling for one turn (0 disables) |
 
 ## Project layout
 
