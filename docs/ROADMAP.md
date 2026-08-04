@@ -341,13 +341,41 @@ HIR 0%.
 - Tool argument errors name the missing parameter instead of leaking a Python
   signature; empty old_string on a missing file points at write_file.
 
-## Milestone 24 — Execution isolation & scale
+## ✅ Milestone 24 — Plan-first execution + diff-aware structural checks
+`t2-rename-in-file` scored for the first time (0/3 -> 1/3). Nothing about the
+model changed; what changed is *when* its attention is spent.
+- **Plan-first (`gate_plan_first`)**: a multi-part request is decomposed up
+  front and each requirement runs as its own focused step with a clean
+  context — before the model has a chance to half-finish part one and then
+  reason from the mess. The focused pass already worked; it had only ever
+  run as repair, after the damage.
+- **Requirement-shaped tool guidance**: the focused prompt used to end with a
+  fixed "use `append_to_file` or `edit_file`", which beat the system prompt's
+  "always use `rename_symbol`" on every rename — and hand-editing a rename
+  hits `self._items.pop(0)` while missing `self.pop()`. Guidance now follows
+  the requirement, including warnings about boolean returns and about
+  changing a signature nobody asked to change.
+- **`narrowed_signature_errors`**: a public function that no longer accepts
+  the calls it used to (`register(name, email)` shipped as `register(user)`).
+  Diff-aware — the file parses and resolves; it is wrong only relative to
+  what was there before. Replayed over 20 commits of real history: no false
+  positives.
+- **`inconsistent_boolean_return_errors`**: `return local and domain` gives
+  `''`, not `False`. Only fires when the function also returns a literal
+  bool *and* an operand is not already boolean.
+- **Constrained tool retry in the focused pass**: the main loop has had it
+  for a long time; the focused pass never did, and a mangled call there is
+  worse because the pass *is* the step.
+- The app shows the plan and marks each step, so multi-part work no longer
+  arrives as a run of unexplained edits.
+
+## Milestone 25 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 25 — More agents & evaluation
+## Milestone 26 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness
