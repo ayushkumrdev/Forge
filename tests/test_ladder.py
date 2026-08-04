@@ -285,3 +285,99 @@ def test_clean_writes_have_zero_hir():
          "output": "Wrote 20 chars to a.py."},
     ])
     assert m.hallucinated_identifier == 0.0
+
+
+# -- dangling references: the rename that missed a caller -------------------------
+# Observed live on t2-rename-in-file: push -> enqueue was applied to the class
+# and to one internal call, leaving queue.push(value) in a module-level helper.
+# Valid Python, resolvable imports, broken at runtime.
+
+BEFORE_RENAME = (
+    "class Queue:\n"
+    "    def push(self, item):\n"
+    "        self._items.append(item)\n\n"
+    "    def drain(self):\n"
+    "        return self.push(1)\n\n\n"
+    "def fill(queue, values):\n"
+    "    queue.push(values)\n"
+)
+
+
+def test_missed_caller_is_caught(tmp_path):
+    from forge.verify.resolution import dangling_reference_errors
+
+    partial = BEFORE_RENAME.replace("def push", "def enqueue").replace(
+        "self.push(1)", "self.enqueue(1)"
+    )  # queue.push(values) left behind
+    problems = dangling_reference_errors(BEFORE_RENAME, partial)
+    assert len(problems) == 1
+    assert "'push' is still called here" in problems[0]
+
+
+def test_complete_rename_passes(tmp_path):
+    from forge.verify.resolution import dangling_reference_errors
+
+    complete = BEFORE_RENAME.replace("push", "enqueue")
+    assert dangling_reference_errors(BEFORE_RENAME, complete) == []
+
+
+def test_removing_a_function_and_its_callers_is_fine():
+    from forge.verify.resolution import dangling_reference_errors
+
+    after = "class Queue:\n    def drain(self):\n        return 1\n"
+    assert dangling_reference_errors(BEFORE_RENAME, after) == []
+
+
+def test_ladder_does_NOT_block_mid_rename(tmp_path):
+    """A rename must be allowed to pass through an inconsistent state.
+    Blocking each write trapped the agent mid-operation and measurably
+    dropped tier 2 from 3/6 to 1/6 (83% wasted cycles). The check runs once
+    at the end of a turn instead — see test_dangling_check_runs_at_turn_end."""
+    repo = _repo(tmp_path)
+    partial = BEFORE_RENAME.replace("def push", "def enqueue").replace(
+        "self.push(1)", "self.enqueue(1)"
+    )
+    verdict = Ladder(repo).check(repo / "q.py", BEFORE_RENAME, partial)
+    assert verdict.ok
+
+
+def test_edit_tool_allows_the_first_step_of_a_rename(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "q.py").write_text(BEFORE_RENAME, encoding="utf-8")
+    session = _session(repo)
+    result = session.registry.execute(
+        "edit_file",
+        {"path": "q.py", "old_string": "    def push(self, item):",
+         "new_string": "    def enqueue(self, item):"},
+    )
+    assert result.ok, result.error
+
+
+def test_dangling_check_runs_at_turn_end(tmp_path):
+    """The incomplete rename is caught once, when the turn tries to finish."""
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage, ToolCall
+    from forge.llm.mock import MockLLMClient
+
+    repo = _repo(tmp_path)
+    (repo / "q.py").write_text(BEFORE_RENAME, encoding="utf-8")
+    finished = BEFORE_RENAME.replace("push", "enqueue")
+    llm = MockLLMClient([
+        # renames the definition but leaves fill() calling the old name
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "q.py",
+                       "content": BEFORE_RENAME.replace("def push", "def enqueue")
+                                               .replace("self.push(1)", "self.enqueue(1)")})]),
+        ChatMessage(role="assistant", content="Renamed it."),
+        # after being told, finishes the job
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "q.py", "content": finished})]),
+        ChatMessage(role="assistant", content="Updated every caller."),
+    ])
+    session = ChatSession(repo, llm, ForgeSettings(), session_id="dang")
+    reply = session.send("rename push to enqueue")
+    assert reply == "Updated every caller."
+    assert "queue.push(" not in (repo / "q.py").read_text(encoding="utf-8")
+    assert any("no longer exists" in m.content for m in session.history)

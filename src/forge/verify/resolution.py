@@ -125,6 +125,61 @@ class RepoIndex:
         return base if base.is_dir() else None
 
 
+def _defined_names(source: str) -> set[str]:
+    """Every function/class name defined anywhere in the file, including
+    methods — a rename has to update calls to those too."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set()
+    return {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+    }
+
+
+def _called_names(source: str) -> dict[str, int]:
+    """Names that are CALLED in the file, mapped to their line number."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return {}
+    calls: dict[str, int] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = (
+            func.id if isinstance(func, ast.Name)
+            else func.attr if isinstance(func, ast.Attribute)
+            else None
+        )
+        if name is not None:
+            calls.setdefault(name, node.lineno)
+    return calls
+
+
+def dangling_reference_errors(original: str, new_content: str) -> list[str]:
+    """A rename that missed a caller.
+
+    When a change removes a definition, nothing in the same file may still
+    call it. Observed live: the model renamed `push` to `enqueue`, updated
+    the call inside the class, and left `queue.push(value)` in a module-level
+    helper — valid Python, resolvable imports, and broken at runtime. This is
+    decided mechanically from the AST, with no model judgement involved."""
+    removed = _defined_names(original) - _defined_names(new_content)
+    if not removed:
+        return []
+    still_called = _called_names(new_content)
+    return [
+        f"line {still_called[name]}: '{name}' is still called here, but its "
+        f"definition was removed or renamed in this change"
+        for name in sorted(removed)
+        if name in still_called
+    ]
+
+
 def resolution_errors(
     file_path: Path, source: str, workspace: Path, max_reported: int = 4
 ) -> list[str]:

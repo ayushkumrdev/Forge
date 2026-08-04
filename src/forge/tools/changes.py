@@ -31,6 +31,11 @@ class ChangeLedger:
             self._originals[path] = None
 
     @property
+    def originals(self) -> dict[Path, str | None]:
+        """Pre-change content of every file touched (None = newly created)."""
+        return dict(self._originals)
+
+    @property
     def changed_files(self) -> list[str]:
         return sorted(
             str(path.relative_to(self.workspace)).replace("\\", "/")

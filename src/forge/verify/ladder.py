@@ -114,6 +114,12 @@ class Ladder:
 
         # L2 — resolution. Always evaluated, even when enforcement is off:
         # an ablation must still measure the hallucinations it stops blocking.
+        # NOTE: dangling-reference checking deliberately does NOT live here.
+        # A rename is inherently multi-step — renaming the definition breaks
+        # its callers until the next edit fixes them — so blocking per-write
+        # traps the agent in an operation it cannot complete. Measured: it
+        # dropped tier 2 from 3/6 to 1/6, with the model thrashing at 83%
+        # wasted cycles. It runs once at the end of a turn instead.
         problems = resolution_errors(path, new_content, self.workspace)
         if problems:
             before = (

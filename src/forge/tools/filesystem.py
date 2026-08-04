@@ -10,7 +10,12 @@ from typing import Any
 from forge.safety.guard import SafetyGuard
 from forge.tools.base import Tool, ToolResult
 from forge.tools.changes import ChangeLedger
-from forge.tools.edit_repair import EditResult, MatchOutcome, compute_edit
+from forge.tools.edit_repair import (
+    EditResult,
+    MatchOutcome,
+    compute_edit,
+    reindent_replacement,
+)
 from forge.tools.syntax_check import gate_edit
 from forge.verify.ladder import Ladder
 
@@ -218,6 +223,22 @@ class EditFileTool(Tool):
             refusal, advisory = _verify(
                 self._ladder, self._syntax_gate, resolved, content, result.new_content
             )
+            repaired_indent = False
+            if refusal and self._edit_repair:
+                # The replacement probably lost its indentation. Try lifting it
+                # to the anchor's depth — and keep the result ONLY if it now
+                # verifies, so a guess can never make things worse.
+                lifted = reindent_replacement(content, old_string, new_string)
+                if lifted != new_string:
+                    candidate = compute_edit(content, old_string, lifted)
+                    if candidate.outcome == MatchOutcome.APPLIED:
+                        retry, retry_advisory = _verify(
+                            self._ladder, self._syntax_gate, resolved,
+                            content, candidate.new_content,
+                        )
+                        if not retry:
+                            result, refusal, advisory = candidate, None, retry_advisory
+                            repaired_indent = True
             if refusal:
                 return ToolResult(
                     ok=False,
@@ -231,6 +252,8 @@ class EditFileTool(Tool):
                 if result.tier == "whitespace"
                 else ""
             )
+            if repaired_indent:
+                note += " (re-indented to match the surrounding block)"
             # the tier is carried in the output so traces reveal HOW the edit
             # landed (exact vs repaired) — the grounded-edit metric reads it
             return ToolResult(

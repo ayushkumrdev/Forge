@@ -9,6 +9,7 @@ re-sent the same broken needle 11 times in a row. These tests pin the repair.
 from forge.tools.edit_repair import (
     MatchOutcome,
     compute_edit,
+    reindent_replacement,
     unescape_literals,
 )
 
@@ -77,3 +78,57 @@ def test_escaped_needle_gets_a_multiline_suggestion_when_it_cannot_apply():
     assert result.suggestion is not None
     assert "\n" in result.suggestion  # spans multiple real lines
     assert "def titlecase(text):" in result.suggestion
+
+
+# -- indentation repair ----------------------------------------------------------
+# Observed live on t2-three-guards: the model replaced `return int(text)` with a
+# multi-line guard block written as if it started at column zero. The result
+# dedented `return` out of its function — and ast.parse ACCEPTED it, so the
+# syntax gate let a file through that Python refuses to run.
+
+FUNC = 'def parse_port(text):\n    """Parse."""\n    return int(text)\n'
+BLOCK = "text = text.strip()\nif not text.isdigit():\n    return None\nreturn int(text)"
+
+
+def test_reindent_lifts_a_flat_block_into_the_function():
+    lifted = reindent_replacement(FUNC, "return int(text)", BLOCK)
+    result = compute_edit(FUNC, "return int(text)", lifted)
+    assert result.outcome == MatchOutcome.APPLIED
+    compile(result.new_content, "<t>", "exec")  # raises if still broken
+
+
+def test_reindent_preserves_relative_nesting():
+    """A nested body must stay nested, not be flattened to the base depth."""
+    fixed = reindent_replacement(FUNC, "return int(text)", BLOCK)
+    lines = fixed.split("\n")
+    assert lines[1] == "    if not text.isdigit():"
+    assert lines[2] == "        return None"  # one level deeper, preserved
+
+
+def test_reindent_leaves_single_line_replacements_alone():
+    assert reindent_replacement(FUNC, "return int(text)", "return 0") == "return 0"
+
+
+def test_reindent_leaves_blank_lines_blank():
+    fixed = reindent_replacement(FUNC, "return int(text)", "a = 1\n\nb = 2")
+    assert "\n\n" in fixed  # no whitespace-only padding introduced
+
+
+def test_reindent_is_a_noop_at_column_zero():
+    flat = "x = 1\ny = 2\n"
+    assert reindent_replacement(flat, "x = 1", "a = 1\nb = 2") == "a = 1\nb = 2"
+
+
+def test_reindent_ignores_a_mid_line_match():
+    content = "value = compute(1)\n"
+    assert reindent_replacement(content, "compute(1)", "a\nb") == "a\nb"
+
+
+def test_compile_catches_what_ast_parse_missed():
+    """The gate now uses compile(), which rejects return/break/yield outside
+    their block — ast.parse accepts all three."""
+    from forge.tools.syntax_check import syntax_error
+
+    for source in ["return 1\n", "break\n", "yield 2\n"]:
+        assert syntax_error("m.py", source) is not None, source
+    assert syntax_error("m.py", "def f():\n    return 1\n") is None

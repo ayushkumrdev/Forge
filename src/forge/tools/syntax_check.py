@@ -13,7 +13,6 @@ not break."""
 
 from __future__ import annotations
 
-import ast
 import json
 import tomllib
 
@@ -80,8 +79,14 @@ def gate_edit(filename: str, original: str | None, new_content: str) -> str | No
 
 
 def _python_error(content: str) -> str | None:
+    # compile(), not ast.parse(): the parser accepts `return`, `break` and
+    # `yield` outside their enclosing block — those are rejected later, when
+    # the symbol table is built. ast.parse alone let a broken file through
+    # that Python itself refuses to run, which is exactly what happened when
+    # a multi-line edit lost its indentation and dedented a return statement
+    # out of its function.
     try:
-        ast.parse(content)
+        compile(content, "<forge>", "exec", dont_inherit=True)
     except SyntaxError as exc:
         location = f"line {exc.lineno}" if exc.lineno else "unknown line"
         snippet = f": {exc.text.strip()!r}" if exc.text and exc.text.strip() else ""

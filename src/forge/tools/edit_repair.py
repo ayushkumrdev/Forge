@@ -98,6 +98,38 @@ def _closest_span(content: str, needle: str) -> tuple[str, float]:
     return best_text, best_ratio
 
 
+def reindent_replacement(content: str, old_string: str, new_string: str) -> str:
+    """Re-indent a multi-line replacement to the depth of the line it lands on.
+
+    Models write `new_string` as if it started at column zero. When the match
+    sits inside a function, every line after the first arrives under-indented
+    and the block falls out of its enclosing scope — observed live: a three
+    line guard turned `return port` into a module-level statement Python
+    refuses to run. Returns the replacement unchanged when it cannot help."""
+    index = content.find(old_string)
+    if index == -1:
+        return new_string
+    line_start = content.rfind("\n", 0, index) + 1
+    base = content[line_start:index]
+    if base.strip():
+        return new_string  # match starts mid-line; nothing reliable to infer
+    if not base:
+        # old_string carried its own indentation, so take the depth from it
+        first = old_string.split("\n", 1)[0]
+        base = first[: len(first) - len(first.lstrip())]
+    if not base:
+        return new_string  # genuinely at column zero
+    lines = new_string.split("\n")
+    if len(lines) < 2:
+        return new_string
+    # Shift the whole block by the anchor's depth, preserving each line's
+    # RELATIVE indentation — a nested body must stay nested. Over-shooting is
+    # safe: the caller keeps this only if the result actually verifies.
+    return lines[0] + "\n" + "\n".join(
+        (base + line if line.strip() else line) for line in lines[1:]
+    )
+
+
 def compute_edit(content: str, old_string: str, new_string: str) -> EditResult:
     """Resolve an (old_string -> new_string) edit against `content`, repairing
     near-misses. Pure function: returns what WOULD happen, applies nothing."""

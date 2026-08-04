@@ -53,6 +53,7 @@ from forge.verify.coverage import (
     looks_multi_requirement,
 )
 from forge.verify.ladder import Ladder
+from forge.verify.resolution import dangling_reference_errors
 
 CHAT_SYSTEM = """You are Forge, an elite autonomous AI software engineer running \
 locally on the user's machine with FULL tool access to their repository. You do \
@@ -432,6 +433,7 @@ class ChatSession:
         nudged = False
         genius_checked = False
         coverage_passes = 0
+        dangling_checked = False
         requirements: list[Requirement] | None = None
         commands_run: list[str] = []
         # the evaluation harness reconstructs per-turn behaviour from the trace
@@ -522,6 +524,27 @@ class ChatSession:
                     self.history.append(message.model_copy(update={"content": content}))
                     self.history.append(ChatMessage(role="user", content=correction))
                     continue
+                # A rename that missed a caller: checked ONCE here, not per
+                # write. Renaming a definition necessarily breaks its callers
+                # until the next edit repairs them, so blocking each write
+                # traps the agent mid-operation.
+                if turn_mutated and not dangling_checked:
+                    dangling_checked = True
+                    stale = self._dangling_references()
+                    if stale:
+                        self.recorder.event("chat", "dangling_reference", output="; ".join(stale))
+                        self.history.append(message.model_copy(update={"content": content}))
+                        self.history.append(
+                            ChatMessage(
+                                role="user",
+                                content="The change is incomplete — these calls now "
+                                "point at something that no longer exists:\n"
+                                + "\n".join(f"- {s}" for s in stale)
+                                + "\n\nFix every one of them now with edit_file.",
+                            )
+                        )
+                        continue
+
                 # Requirement coverage: the turn may not end while a part of
                 # the request is provably absent from the diff. Checked
                 # against evidence, never against the model's summary.
@@ -654,6 +677,26 @@ class ChatSession:
         if self.effort == "genius":
             return int(base * 1.5)
         return base
+
+    def _dangling_references(self) -> list[str]:
+        """Calls left pointing at definitions this session removed or renamed.
+
+        Decided from the AST of each changed file against the copy the ledger
+        saved before the first write — no model judgement, no guessing."""
+        problems: list[str] = []
+        for path, original in self.ledger.originals.items():
+            if original is None or path.suffix != ".py" or not path.is_file():
+                continue
+            try:
+                current = path.read_text(encoding="utf-8-sig", errors="replace")
+            except OSError:
+                continue
+            name = path.name
+            problems.extend(
+                f"{name}: {issue}"
+                for issue in dangling_reference_errors(original, current)
+            )
+        return problems[:4]
 
     def _focused_pass(
         self, requirement: Requirement, done: list[Requirement], budget: int = 6
