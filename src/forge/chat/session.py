@@ -195,7 +195,13 @@ _ACTION_REQUEST_RE = re.compile(
     r"\b(?:add|fix|writ|creat|implement|refactor|chang|updat|remov|delet|"
     r"renam|mov|install|build|convert|replac|improv|optimi[sz]|correct|"
     r"patch|appl|extract|split|merg|migrat|upgrad|mak|ensur|handl|support|"
-    r"guard|wire|enabl|disabl|rework|rewrit|set up|clean up)"
+    r"guard|wire|enabl|disabl|rework|rewrit|set up|clean up|"
+    # "set x to 2 in a.py" read as conversation, so nothing was armed for it:
+    # not the act-don't-tell gate, not plan-first, not coverage. Every verb
+    # below is one a user plainly uses to ask for a change.
+    r"set|sort|insert|append|prepend|bump|swap|reorder|revert|strip|trim|"
+    r"normali[sz]|rais|catch|expose|export|import|register|document|hook|"
+    r"wrap|rename|drop|expand|shorten|rename|dedupe|cache|validat)"
     r"(?:e|es|ed|ing|s)?\b",
     re.IGNORECASE,
 )
@@ -203,7 +209,16 @@ _ACTION_REQUEST_RE = re.compile(
 # must not arm the gate, or explanatory answers get bounced as deflection.
 _QUESTION_RE = re.compile(
     r"^\s*(?:how|what|what's|why|when|where|which|who|can|could|would|should|"
-    r"does|do|did|is|are|was|explain|tell me|describe)\b",
+    r"does|do|did|is|are|was)\b",
+    re.IGNORECASE,
+)
+# These openers only ever ask for prose, with or without a question mark.
+# They are separated from the rest because "can you add logging" IS a
+# request while "explain how sorting works" never is — and the wider verb
+# list above makes that distinction matter more than it used to.
+_EXPLANATION_RE = re.compile(
+    r"^\s*(?:explain|describe|tell me|walk me through|summari[sz]e|"
+    r"give me an overview|what is|what's|what are)\b",
     re.IGNORECASE,
 )
 
@@ -211,6 +226,8 @@ _QUESTION_RE = re.compile(
 def is_action_request(text: str) -> bool:
     """True when the user is asking for a change rather than an explanation."""
     if _ACTION_REQUEST_RE.search(text) is None:
+        return False
+    if _EXPLANATION_RE.match(text):
         return False
     return not (_QUESTION_RE.match(text) and text.rstrip().endswith("?"))
 _CODE_FENCE_RE = re.compile(r"```[\w+-]*\n.+?```", re.DOTALL)
@@ -672,6 +689,33 @@ class ChatSession:
                     if stale:
                         dangling_passes += 1
                         self.recorder.event("chat", "dangling_reference", output="; ".join(stale))
+                        if dangling_passes > 1 and self.settings.gate_focused_retry:
+                            # The in-thread correction has already been tried
+                            # and did not land. Repeating it into an even
+                            # longer history is the exact failure the focused
+                            # pass was built for — the model reads a precise
+                            # instruction at the end of a twenty-message
+                            # conversation and does something else. Give the
+                            # repair its own clean context instead.
+                            self.recorder.event(
+                                "chat", "structural_focused_repair",
+                                output="; ".join(stale)[:200],
+                            )
+                            self._focused_pass(
+                                Requirement(id=0, text="; ".join(stale)),
+                                [],
+                                note=self._structural_nudge(stale),
+                            )
+                            self.history.append(message.model_copy(update={"content": content}))
+                            self.history.append(
+                                ChatMessage(
+                                    role="user",
+                                    content="That problem was repaired in a "
+                                    "separate focused step. Check the file is "
+                                    "consistent and summarize what changed.",
+                                )
+                            )
+                            continue
                         self.history.append(message.model_copy(update={"content": content}))
                         self.history.append(
                             ChatMessage(
@@ -1020,6 +1064,7 @@ class ChatSession:
             ChatMessage(role="user", content=focused_prompt(requirement, done, note))
         ]
         changed = False
+        pushed_back = False
         for _ in range(budget):
             if self._cancelled():
                 return changed
@@ -1060,7 +1105,28 @@ class ChatSession:
                         tool=message.tool_calls[0].name,
                     )
             if not message.tool_calls:
-                break
+                # A step used to end here, on the model's first sentence. The
+                # traces were unambiguous: EVERY first attempt at a focused
+                # step made no tool call and was abandoned, and the retry —
+                # identical but for a line saying "do not reply until the
+                # tool has reported it" — then did the work. The model was
+                # narrating its plan, not refusing. Say it once, in the pass,
+                # rather than throwing the whole step away.
+                if changed or pushed_back:
+                    break
+                pushed_back = True
+                self.recorder.event("chat", "focused_push_back")
+                history.append(message)
+                history.append(
+                    ChatMessage(
+                        role="user",
+                        content="Nothing has changed on disk yet — a reply is "
+                        "not an edit. Make the change now with a tool call, and "
+                        "do not answer in plain text until the tool has reported "
+                        "that it landed.",
+                    )
+                )
+                continue
             history.append(message)
             for call in message.tool_calls:
                 self.recorder.event(

@@ -615,14 +615,21 @@ def test_structural_check_reruns_after_a_partial_fix(tmp_path):
         ChatMessage(role="assistant", tool_calls=[ToolCall(
             name="write_file", arguments={"path": "q.py", "content": step3})]),
         ChatMessage(role="assistant", content="Restored self too."),
+        ChatMessage(role="assistant", content="All consistent now."),
     ])
     session = ChatSession(repo, llm, ForgeSettings(), session_id="rerun")
-    reply = session.send("rename push to enqueue")
-    assert reply == "Restored self too."
+    session.send("rename push to enqueue")
     assert "def enqueue(self, item)" in (repo / "q.py").read_text(encoding="utf-8")
-    # it took two corrective rounds, i.e. the check ran more than once
+    # two corrective rounds: an in-thread nudge, then — because that one did
+    # not finish the job — the repair moved to its own clean context
     prompts = [m.content for m in session.history if "does not exist" in m.content]
-    assert len(prompts) == 2
+    assert len(prompts) == 1
+    focused = [
+        req for req in llm.requests
+        if len(req) == 2 and "Do exactly this one thing" in req[-1].content
+    ]
+    assert len(focused) == 1
+    assert "does not exist" in focused[0][-1].content
 
 
 def test_structural_check_is_bounded(tmp_path):
@@ -639,11 +646,18 @@ def test_structural_check_is_bounded(tmp_path):
     write = ChatMessage(role="assistant", tool_calls=[ToolCall(
         name="write_file", arguments={"path": "q.py", "content": broken})])
     stuck = ChatMessage(role="assistant", content="I renamed it.")
-    llm = MockLLMClient([write, stuck, write, stuck, write, stuck, write, stuck])
+    llm = MockLLMClient([write, stuck] * 6)
     session = ChatSession(repo, llm, ForgeSettings(), session_id="bounded")
     assert session.send("rename push to enqueue") == "I renamed it."
+    # one in-thread nudge, one focused repair, then the turn ends rather than
+    # arguing with a model that cannot fix it
     prompts = [m.content for m in session.history if "does not exist" in m.content]
-    assert len(prompts) == 2  # bounded at _MAX_STRUCTURAL_PASSES
+    assert len(prompts) == 1
+    focused = [
+        req for req in llm.requests
+        if len(req) == 2 and "Do exactly this one thing" in req[-1].content
+    ]
+    assert len(focused) == 1
 
 
 def test_builtin_container_calls_are_not_mistaken_for_a_missed_caller():

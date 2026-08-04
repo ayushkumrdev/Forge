@@ -699,7 +699,9 @@ def test_a_focused_step_that_touched_nothing_is_retried_once(workspace):
         ChatMessage(role="assistant", content="Added it."),
         # step 2 talks instead of editing — signup.py stays untouched
         ChatMessage(role="assistant", content="You should call validate_email in register."),
-        # the retry gets a clean context and actually does it
+        # pushed back once inside the pass; still only talks
+        ChatMessage(role="assistant", content="It really should be called there."),
+        # the outer retry gets a clean context and actually does it
         ChatMessage(role="assistant", tool_calls=[ToolCall(
             name="write_file",
             arguments={"path": "signup.py",
@@ -778,6 +780,8 @@ def test_a_focused_step_recovers_a_mangled_tool_call(workspace):
         )),
         ChatMessage(role="assistant", content="Renamed."),
         ChatMessage(role="assistant", content="Nothing more to do."),
+        ChatMessage(role="assistant", content="Still nothing more to do."),
+        ChatMessage(role="assistant", content="All renamed."),
         ChatMessage(role="assistant", content="All renamed."),
         ChatMessage(role="assistant", content=(
             '{"items": [{"id": 1, "met": true, "reason": "d"},'
@@ -934,3 +938,111 @@ def test_a_step_that_changes_nothing_is_retried_even_when_the_file_was_touched(w
     session.send("rename push to enqueue and rename pop to dequeue in q.py")
     text = (workspace / "q.py").read_text(encoding="utf-8")
     assert "def enqueue" in text and "def dequeue" in text
+
+
+def test_a_structural_problem_that_survives_one_nudge_gets_a_clean_context(workspace):
+    """The in-thread nudge is precise and the model still ignores it at the
+    end of a long conversation — which is the whole reason the focused pass
+    exists. Repeating the nudge into an even longer history cannot help."""
+    (workspace / "signup.py").write_text(
+        "def register(name):\n    return name\n", encoding="utf-8"
+    )
+    broken = (
+        "def register(name):\n"
+        "    if not validate_email(name):\n"
+        "        raise ValueError('invalid email')\n"
+        "    return name\n"
+    )
+    fixed = "from validators import validate_email\n\n\n" + broken
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "signup.py", "content": broken})]),
+        ChatMessage(role="assistant", content="Wired it in."),
+        # first nudge lands in the thread and the model ignores it
+        ChatMessage(role="assistant", content="It all looks right to me."),
+        # second detection escalates to a focused pass, which does the work
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "signup.py", "content": fixed})]),
+        ChatMessage(role="assistant", content="Added the import."),
+        ChatMessage(role="assistant", content="Import added, file consistent."),
+    ])
+    (workspace / "validators.py").write_text(
+        "def validate_email(a):\n    return True\n", encoding="utf-8"
+    )
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="sfr")
+    session.send("make register reject a bad email")
+
+    assert "from validators import validate_email" in (
+        workspace / "signup.py"
+    ).read_text(encoding="utf-8")
+    focused_starts = [
+        req for req in llm.requests
+        if len(req) == 2 and "Do exactly this one thing" in req[-1].content
+    ]
+    assert len(focused_starts) == 1
+    # the repair gets the diagnosis AND the file as it stands, not a summary
+    assert "never defines or imports" in focused_starts[0][-1].content
+    assert "as it is NOW" in focused_starts[0][-1].content
+
+
+def test_a_step_that_narrates_instead_of_editing_is_pushed_back_in_place(workspace):
+    """Found in the traces: EVERY first attempt at a focused step made no tool
+    call and the step was thrown away, and the retry — identical but for a
+    line saying not to reply until the tool has reported — then did the work.
+    The model was narrating its plan, not refusing."""
+    (workspace / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "b.py").write_text("y = 1\n", encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "a.py sets x to 2"},'
+            ' {"id": 2, "text": "b.py sets y to 2"}]}'
+        )),
+        # step 1 narrates first, then acts once told to
+        ChatMessage(role="assistant", content="I will now update a.py to set x to 2."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "a.py", "content": "x = 2\n"})]),
+        ChatMessage(role="assistant", content="Set x."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "b.py", "content": "y = 2\n"})]),
+        ChatMessage(role="assistant", content="Set y."),
+        ChatMessage(role="assistant", content="Both set."),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": true, "reason": "d"}]}'
+        )),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="pb")
+    session.send("set x to 2 in a.py and set y to 2 in b.py")
+
+    assert (workspace / "a.py").read_text(encoding="utf-8") == "x = 2\n"
+    # the step recovered inside itself: no outer retry was needed
+    assert not any(
+        "An earlier attempt at THIS step" in m.content
+        for req in llm.requests for m in req
+    )
+    assert any(
+        "a reply is not an edit" in m.content for req in llm.requests for m in req
+    )
+
+
+def test_the_push_back_happens_at_most_once_per_step(workspace):
+    """A model that will not act must not be argued with for the whole budget."""
+    (workspace / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "b.py").write_text("y = 1\n", encoding="utf-8")
+    llm = MockLLMClient(
+        [
+            ChatMessage(role="assistant", content=(
+                '{"requirements": [{"id": 1, "text": "a.py sets x to 2"},'
+                ' {"id": 2, "text": "b.py sets y to 2"}]}'
+            ))
+        ]
+        + [ChatMessage(role="assistant", content="I would edit the file.")] * 20
+    )
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="pb2")
+    session.send("set x to 2 in a.py and set y to 2 in b.py")
+    push_backs = sum(
+        1 for req in llm.requests for m in req if "a reply is not an edit" in m.content
+    )
+    # two requirements, each attempted twice (pass + outer retry), one
+    # push-back each — and each push-back is visible in that pass's later calls
+    assert push_backs == 4

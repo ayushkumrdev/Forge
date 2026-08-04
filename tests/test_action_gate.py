@@ -260,6 +260,12 @@ def test_action_detection_covers_inflections_but_not_questions():
         "fixing the off-by-one in chunk()",
         "changing the parser to accept tabs",
         "add a slugify function",
+        # every one of these was read as conversation, so nothing was armed
+        "set x to 2 in a.py and set y to 2 in b.py",
+        "sort the results by name",
+        "raise ValueError when the address is empty",
+        "validate the email before creating the user",
+        "revert the timeout to 30",
     ]:
         assert is_action_request(text), text
 
@@ -267,6 +273,10 @@ def test_action_detection_covers_inflections_but_not_questions():
         "how do I add two numbers in python?",
         "what does this function change?",
         "can you explain how the build works?",
+        # explanatory openers never ask for a change, question mark or not
+        "explain how the results are sorted",
+        "describe how the cache is set up",
+        "tell me why validate_email returns False here",
     ]:
         assert not is_action_request(text), text
 
