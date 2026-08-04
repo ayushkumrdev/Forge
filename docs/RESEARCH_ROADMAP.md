@@ -416,6 +416,48 @@ slips in anyway) is what turned the mechanism from a regression into a gain.
 Any future search-based contribution should be reported with the quality of
 its search space, not just its budget.
 
+### 3.5g Where the tiers actually stood: mostly Forge, not the model
+
+Driving T3/T4 off zero took four more fixes, and every one was on Forge's
+side. **Overall TSR 23.8% -> 55.0%** across the whole hunt, with every tier
+now scoring:
+
+| tier | start | now |
+| --- | --- | --- |
+| T1 single edit | 5/9 | 5/6 |
+| T2 several requirements | 0/6 | 3/6 |
+| T3 cross-file | 0/6 | 2/4 |
+| T4 repo-level | 0/6 | 1/4 |
+
+1. **The benchmark was lying.** `t2-rename-in-file` imported the stdlib
+   `queue` instead of its own fixture, so it could never pass. Every failure
+   read as an agent failure and sent me hunting causes in Forge. Now every
+   task carries a reference solution and a test proves all ten solvable.
+2. **`rename_symbol` stopped at one file.** On `t3-rename-propagate` the
+   model did everything right — correct tool, correct rename — and failed
+   because the two importing files kept calling the old name. Propagating
+   the rename to importers took that task 0/2 -> 2/2.
+3. **The coverage gate never armed without a conjunction.** "Add a --upper
+   flag: when passed, output is uppercased. Keep the default identical." is
+   three requirements and contains no "and", so the pre-filter said
+   single-outcome and the whole gate sat out. The model shipped two of three
+   — uppercase logic and `args.upper`, no parser flag — and every run raised
+   AttributeError. The filter now counts action-bearing clauses.
+4. **Tool errors leaked Python signatures.** A missing argument returned
+   `run() missing 1 required positional argument: 'path'`, which grounds the
+   model in nothing. It now names the missing and unexpected arguments in the
+   tool's own vocabulary.
+
+**The pattern across this entire hunt is the finding.** Nine of the ten
+defects were in the harness or the tool layer, not the model: line-ending
+corruption, a syntax gate weaker than advertised, indentation loss, a missing
+append affordance, a receiver-blind reference check, a single-file rename, an
+unsolvable benchmark task, a metric that scored renames as inaction, and a
+pre-filter that silently disabled a gate. Each one had been reading as "the
+7B is not capable enough". **Attributing agent failures to the agent, before
+auditing the scaffold, is the most expensive mistake available in this
+line of work** — and only tracing real runs distinguishes them.
+
 ### 3.6 What the first numbers already tell us
 
 - The remaining tier-1 failure is **deflection, not capability**: ADT 0% on

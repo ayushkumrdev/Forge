@@ -309,13 +309,27 @@ Overall TSR 23.8% -> **45.0%**; tier 2 0/6 -> **6/9**.
   carries the file's current contents plus, for a rename, the exact
   rename_symbol call to make.
 
-## Milestone 22 — Execution isolation & scale
+## ✅ Milestone 22 — Cross-file rename, coverage arming, tool diagnostics
+Overall TSR **45.0% -> 55.0%**; every tier now scores (T1 5/6, T2 3/6,
+T3 2/4, T4 1/4) — from 23.8% and three empty tiers at the start of the hunt.
+- **`rename_symbol` propagates across the repository**: it finds every file
+  importing the module and updates both shapes (`from m import f` plus the
+  bare calls it binds, and `m.f(...)`). Each dependent file is verified
+  before writing and ledgered for undo. Took t3-rename-propagate 0/2 -> 2/2.
+- **Coverage gate arms without a conjunction**: a request with three
+  requirements and no "and" was treated as single-outcome, so the gate never
+  ran and the model shipped two of three. The pre-filter now counts clauses
+  containing an action verb.
+- **Tool argument errors ground the model**: missing/unexpected arguments are
+  named in the tool's vocabulary instead of leaking a Python signature.
+
+## Milestone 23 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 23 — More agents & evaluation
+## Milestone 24 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness
