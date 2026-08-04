@@ -49,6 +49,7 @@ from forge.verify.coverage import (
     build_evidence,
     coverage_nudge,
     decompose,
+    focused_prompt,
     looks_multi_requirement,
 )
 from forge.verify.ladder import Ladder
@@ -562,9 +563,29 @@ class ChatSession:
                             self.history.append(
                                 message.model_copy(update={"content": content})
                             )
-                            self.history.append(
-                                ChatMessage(role="user", content=coverage_nudge(missing))
-                            )
+                            if self.settings.gate_focused_retry:
+                                # Give each missing requirement its own clean
+                                # turn instead of a nudge appended to a long,
+                                # polluted history — the same model follows a
+                                # short focused task it ignores at the end of
+                                # a twenty-message conversation.
+                                done = [r for r in requirements if r not in missing]
+                                for requirement in missing:
+                                    self._focused_pass(requirement, done)
+                                self.history.append(
+                                    ChatMessage(
+                                        role="user",
+                                        content="The missing parts were handled in "
+                                        "focused passes. Summarize the whole change "
+                                        "in plain text.",
+                                    )
+                                )
+                            else:
+                                self.history.append(
+                                    ChatMessage(
+                                        role="user", content=coverage_nudge(missing)
+                                    )
+                                )
                             continue
 
                 if self.effort == "genius" and action_turn and not genius_checked:
@@ -633,6 +654,61 @@ class ChatSession:
         if self.effort == "genius":
             return int(base * 1.5)
         return base
+
+    def _focused_pass(
+        self, requirement: Requirement, done: list[Requirement], budget: int = 6
+    ) -> bool:
+        """Run one requirement as a short task with a CLEAN context.
+
+        Capability on fixed hardware comes from spending the model's
+        attention better, not from a bigger model: the same 7B that ignores a
+        correction at the end of a long conversation will carry out the same
+        instruction when it is the only thing in front of it. Returns True if
+        a file was changed."""
+        self.recorder.event("chat", "focused_pass", output=requirement.text[:200])
+        history: list[ChatMessage] = [
+            ChatMessage(role="user", content=focused_prompt(requirement, done))
+        ]
+        changed = False
+        for _ in range(budget):
+            if self._cancelled():
+                return changed
+            if self.on_step is not None:
+                self.on_step()
+            try:
+                response = self.llm.chat(
+                    [ChatMessage(role="system", content=self._system), *history],
+                    tools=self.registry.specs(),
+                )
+            except Exception:  # noqa: BLE001 — a focused pass must never kill the turn
+                self.recorder.event("chat", "focused_pass_failed")
+                return changed
+            self.usage.add(response.usage)
+            message = recover_inline_tool_call(response.message, self.registry.names())
+            if not message.tool_calls:
+                break
+            history.append(message)
+            for call in message.tool_calls:
+                self.recorder.event(
+                    "chat", "tool_call", tool=call.name, arguments=call.arguments
+                )
+                result = self.registry.execute(call.name, call.arguments)
+                self.recorder.event(
+                    "chat", "tool_result", tool=call.name, ok=result.ok,
+                    error=result.error,
+                    output=(result.output[:400] if result.ok else None),
+                )
+                if result.ok and call.name in _FILE_MUTATING_TOOLS:
+                    changed = True
+                history.append(
+                    ChatMessage(
+                        role="tool",
+                        content=result.render(self.settings.max_tool_output_chars),
+                        tool_name=call.name,
+                    )
+                )
+        self.recorder.event("chat", "focused_pass_done", ok=changed)
+        return changed
 
     def _interpret(self, user_text: str) -> str:
         """Two-model brain: the thinker model turns the raw message into a

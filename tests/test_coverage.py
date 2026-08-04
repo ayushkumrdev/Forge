@@ -162,7 +162,9 @@ def test_turn_cannot_end_while_a_requirement_is_missing(workspace):
             ' {"id": 2, "met": true, "reason": "checkout calls it"}]}'
         )),
     ])
-    session = ChatSession(workspace, llm, ForgeSettings(), session_id="cov")
+    # this test covers the in-place nudge path; the focused path has its own
+    settings = ForgeSettings(gate_focused_retry=False)
+    session = ChatSession(workspace, llm, settings, session_id="cov")
     reply = session.send("add apply_discount to prices.py and use it in checkout")
 
     assert reply == "Now checkout uses it."
@@ -233,7 +235,8 @@ def test_coverage_is_bounded(workspace):
         stubborn, unmet,
         stubborn,
     ])
-    session = ChatSession(workspace, llm, ForgeSettings(), session_id="cov5")
+    settings = ForgeSettings(gate_focused_retry=False)
+    session = ChatSession(workspace, llm, settings, session_id="cov5")
     assert session.send("set x to 2 and also add y") == "Half done."
     gaps = [m for m in session.history if "does not yet cover" in m.content]
     assert len(gaps) == 2  # bounded at _MAX_COVERAGE_PASSES
@@ -275,3 +278,108 @@ def test_coverage_runs_at_smart_and_genius(workspace, effort):
     # the decomposition request is identifiable by its system prompt
     systems = [m.content for req in llm.requests for m in req if m.role == "system"]
     assert any("You split a software request" in s for s in systems)
+
+
+# -- focused retry: capability from attention, not model size ----------------------
+
+
+def test_focused_pass_gets_a_clean_context(workspace):
+    """The lever for fixed hardware: a missing requirement is re-issued as its
+    OWN short task, not appended to a long polluted history. The observed
+    failure was the model ignoring a correct instruction at the end of a
+    twenty-message conversation."""
+    (workspace / "prices.py").write_text("def checkout(i):\n    return 0\n", "utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "prices.py", "content": "def checkout(i):\n    return 1\n"})]),
+        ChatMessage(role="assistant", content="Tweaked checkout."),
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "checkout returns 1"},'
+            ' {"id": 2, "text": "apply_discount exists"}]}'
+        )),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": false, "reason": "absent"}]}'
+        )),
+        # the focused pass — a fresh, single-requirement conversation
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="append_to_file",
+            arguments={"path": "prices.py",
+                       "content": "def apply_discount(a, p):\n    return a\n"})]),
+        ChatMessage(role="assistant", content="Added it."),
+        ChatMessage(role="assistant", content="Both parts are done."),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="foc")
+    reply = session.send("set checkout to 1 and also add apply_discount")
+
+    assert "apply_discount" in (workspace / "prices.py").read_text(encoding="utf-8")
+    assert reply == "Both parts are done."
+    # the focused request went out with a SHORT history, not the main thread
+    focused = [
+        req for req in llm.requests
+        if any("Do exactly this one thing" in m.content for m in req)
+    ]
+    assert focused, "no focused pass was issued"
+    assert len(focused[0]) <= 3, "focused pass must start from a clean context"
+
+
+def test_focused_prompt_states_one_thing_and_protects_the_rest():
+    from forge.verify.coverage import focused_prompt
+
+    prompt = focused_prompt(
+        Requirement(id=2, text="apply_discount exists"),
+        [Requirement(id=1, text="checkout returns 1")],
+    )
+    assert "Do exactly this one thing" in prompt
+    assert "apply_discount exists" in prompt
+    assert "do NOT redo these" in prompt
+    assert "checkout returns 1" in prompt
+    assert "append_to_file" in prompt
+
+
+def test_focused_retry_can_be_ablated(workspace):
+    (workspace / "m.py").write_text("x = 1\n", encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "m.py", "content": "x = 2\n"})]),
+        ChatMessage(role="assistant", content="Did one."),
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "x"}, {"id": 2, "text": "y"}]}')),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": false, "reason": "no"}]}')),
+        ChatMessage(role="assistant", content="Still one."),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": false, "reason": "no"}]}')),
+        ChatMessage(role="assistant", content="Still one."),
+    ])
+    settings = ForgeSettings(gate_focused_retry=False)
+    session = ChatSession(workspace, llm, settings, session_id="foc2")
+    session.send("set x to 2 and also add y")
+    assert not any("Do exactly this one thing" in m.content for m in session.history)
+
+
+def test_focused_pass_failure_does_not_break_the_turn(workspace):
+    """An LLM error inside a focused pass must be swallowed."""
+    class Flaky(MockLLMClient):
+        def chat(self, messages, **kwargs):
+            if any("Do exactly this one thing" in m.content for m in messages):
+                raise RuntimeError("model died")
+            return super().chat(messages, **kwargs)
+
+    (workspace / "m.py").write_text("x = 1\n", encoding="utf-8")
+    llm = Flaky([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "m.py", "content": "x = 2\n"})]),
+        ChatMessage(role="assistant", content="Did one."),
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "x"}, {"id": 2, "text": "y"}]}')),
+        ChatMessage(role="assistant", content=(
+            '{"items": [{"id": 1, "met": true, "reason": "d"},'
+            ' {"id": 2, "met": false, "reason": "no"}]}')),
+        ChatMessage(role="assistant", content="Summary after the failed pass."),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="foc3")
+    assert session.send("set x to 2 and also add y") == "Summary after the failed pass."

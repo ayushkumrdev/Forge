@@ -148,6 +148,30 @@ def assess(
         return CoverageVerdict()
 
 
+def focused_prompt(requirement: Requirement, done: list[Requirement]) -> str:
+    """A single requirement, stated on its own with a clean slate.
+
+    Nudging inside the original conversation failed in practice: by the time
+    the gap is detected the history holds a dozen tool results and two
+    corrections, and the model — told precisely what to do — re-ran the test
+    command instead. The same model, given the same instruction as a short
+    focused task, has the whole budget and none of the noise."""
+    context = ""
+    if done:
+        finished = "\n".join(f"- {r.text}" for r in done)
+        context = (
+            "\n\nAlready done — do NOT redo these, and do not break them:\n"
+            + finished
+        )
+    return (
+        f"Do exactly this one thing, nothing else:\n\n{requirement.text}"
+        f"{context}\n\n"
+        "Read the file first, then make the change with append_to_file (to add "
+        "something new) or edit_file (to change existing text). Reply in plain "
+        "text only when the change is in the file."
+    )
+
+
 def coverage_nudge(unmet: list[Requirement]) -> str:
     listing = "\n".join(f"- {r.text}" for r in unmet)
     return (

@@ -56,6 +56,11 @@ class ForgeSettings(BaseSettings):
     # refuse to end the turn while one is provably absent from the diff.
     # Targets partial completion / task drift, which every other gate misses.
     gate_coverage: bool = True
+    # When coverage finds a gap, run each missing requirement as its own
+    # focused turn with a clean context instead of appending a correction to
+    # a long history. Buys capability from a fixed model by spending its
+    # attention better.
+    gate_focused_retry: bool = True
 
     # Repository scanning
     max_tree_entries: int = 400

@@ -40,6 +40,7 @@ ABLATIONS: dict[str, dict[str, bool]] = {
     "no-preflight": {"gate_preflight": False},
     "no-resolution": {"gate_resolution": False},
     "no-coverage": {"gate_coverage": False},
+    "no-focused-retry": {"gate_focused_retry": False},
     "no-gates": {
         "syntax_gate": False,
         "gate_edit_repair": False,
@@ -49,6 +50,7 @@ ABLATIONS: dict[str, dict[str, bool]] = {
         "gate_constrained_retry": False,
         "gate_resolution": False,
         "gate_coverage": False,
+        "gate_focused_retry": False,
     },
 }
 
