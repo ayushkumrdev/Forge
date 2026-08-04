@@ -176,23 +176,40 @@
   .body code:not(pre code) { font-family: var(--mono); font-size: 12.5px; background: var(--surface); padding: 1px 6px; border-radius: 5px; color: var(--ink); }
   .k { color: #d99777; } .s { color: #a5c28b; } .c { color: #837d72; font-style: italic; } .n { color: #8dabcd; }
 
-  /* tool cards */
-  .tools { margin: -12px 0 24px; display: flex; flex-direction: column; gap: 4px; }
-  .tcard { border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: var(--bg-deep); overflow: hidden; animation: rise .18s ease both; }
+  /* tool activity — one LINE per action, not a box. The thread should read
+     as a list of things Forge did, the way a colleague would narrate them. */
+  .tools { margin: -6px 0 20px; display: flex; flex-direction: column; gap: 1px; }
+  .tcard { animation: rise .18s ease both; }
   .tcard summary {
-    list-style: none; display: flex; align-items: center; gap: 10px; padding: 8px 13px; cursor: pointer;
-    font-family: var(--mono); font-size: 11.5px; color: var(--dim); user-select: none;
+    list-style: none; display: flex; align-items: baseline; gap: 8px;
+    padding: 2px 0 2px 2px; cursor: pointer; border-radius: 5px;
+    font-family: var(--mono); font-size: 12px; line-height: 1.75;
+    color: var(--dim); user-select: none;
   }
   .tcard summary::-webkit-details-marker { display: none; }
   .tcard summary:hover { background: var(--surface); }
-  .tcard .glyph { color: var(--accent); width: 14px; text-align: center; }
-  .tcard .tname { color: var(--ink); font-weight: 600; }
-  .tcard .targ { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); }
-  .tcard .st-ok { color: var(--ok); } .tcard .st-err { color: var(--err); }
-  .tcard .tbody { border-top: 1px solid var(--line-soft); padding: 11px 13px; font-family: var(--mono); font-size: 11.5px; color: var(--dim); white-space: pre-wrap; word-break: break-all; max-height: 260px; overflow-y: auto; background: var(--bg); }
+  .tcard summary:hover .chev { opacity: 1; }
+  .tcard .glyph { color: var(--accent); font-size: 9px; line-height: inherit; flex-shrink: 0; }
+  /* the verb never wraps or shrinks — it is the point of the line. The path
+     absorbs any squeeze and ellipsises, so a narrow window degrades to
+     "Edited …/session.py" rather than a three-line "Ran the tests". */
+  .tcard .tname { color: var(--ink); white-space: nowrap; flex-shrink: 0; }
+  .tcard .targ { color: var(--faint); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* +12 -3, so a glance at the line says how big the edit was */
+  .tcard .tdelta { font-size: 11px; flex-shrink: 0; }
+  .tcard .tdelta .a { color: #a5c28b; } .tcard .tdelta .d { color: #e5978d; }
+  .tcard .st-ok { color: var(--ok); flex-shrink: 0; } .tcard .st-err { color: var(--err); flex-shrink: 0; }
+  .tcard .tstat { color: var(--faint); flex-shrink: 0; }
+  .tcard .spring { flex: 1; }
+  .tcard .tbody {
+    margin: 2px 0 6px 7px; padding: 4px 0 4px 13px;
+    border-left: 1px solid var(--line-soft);
+    font-family: var(--mono); font-size: 11.5px; color: var(--dim);
+    white-space: pre-wrap; word-break: break-all; max-height: 280px; overflow-y: auto;
+  }
   .tbody .sect { color: var(--faint); letter-spacing: 1px; text-transform: uppercase; font-size: 9.5px; margin: 7px 0 3px; }
-  .tcard .chev { color: var(--faint); font-size: 12px; transition: transform .15s ease; }
-  .tcard[open] .chev { transform: rotate(180deg); }
+  .tcard .chev { color: var(--faint); font-size: 11px; opacity: 0; transition: transform .15s ease, opacity .15s ease; flex-shrink: 0; }
+  .tcard[open] .chev { transform: rotate(180deg); opacity: 1; }
   .tbody .dline { white-space: pre-wrap; word-break: break-all; padding: 1px 6px; border-radius: 4px; }
   .tbody .dline.da { color: #a5c28b; background: rgba(165,194,139,.08); }
   .tbody .dline.dd { color: #e5978d; background: rgba(229,117,106,.08); }
@@ -249,9 +266,19 @@
   }
   #send:hover { background: var(--accent-strong); }
   #send:disabled { opacity: .35; cursor: default; }
-  #stop { display: none; background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 15px; padding: 5px 13px; font-size: 12px; font-family: var(--body); cursor: pointer; }
+  #send.hidden { display: none; }
+  /* Send and Stop occupy the same slot and are never both visible: while a
+     turn is running the only button there is Stop. Same size and position as
+     Send so nothing shifts, but a square on a dim surface reads instantly as
+     "halt" where the accent arrow reads as "go". */
+  #stop {
+    display: none; border: 1px solid var(--line); background: var(--surface);
+    color: var(--dim); border-radius: 50%; width: 32px; height: 32px; flex-shrink: 0;
+    align-items: center; justify-content: center; font-size: 11px;
+    font-family: var(--body); cursor: pointer; transition: border-color .15s, color .15s;
+  }
   #stop:hover { border-color: var(--err); color: var(--err); }
-  #stop.on { display: block; }
+  #stop.on { display: flex; }
   #jump {
     display: none; position: absolute; left: 50%; transform: translateX(-50%);
     bottom: 108px; z-index: 20; background: var(--raise); color: var(--ink);
@@ -378,7 +405,7 @@
           <button id="c-genius" onclick="setEffort('genius')">Genius</button>
         </div>
         <div class="spacer"></div>
-        <button id="stop" onclick="stopTurn()">Stop</button>
+        <button id="stop" onclick="stopTurn()" aria-label="Stop" title="Stop (Esc)">■</button>
         <button id="send" onclick="sendMessage()" aria-label="Send" title="Send">↑</button>
       </div>
     </div>
@@ -795,7 +822,11 @@ const TOOL_VERBS = {
   web_search: "Searched the web for", fetch_url: "Fetched",
   github_repo: "Analyzed", github_file: "Read from GitHub",
   read_image: "Looked at",
+  rename_symbol: "Renamed", run_tests: "Ran the tests",
 };
+// tools whose action needs no object — "Ran the tests" already says it all,
+// and printing "{}" next to it just looked broken
+const NO_SUBJECT = new Set(["run_tests"]);
 function diffLines(text, sign, cls, cap = 30) {
   const lines = String(text ?? "").replace(/\n$/, "").split("\n");
   let html = lines.slice(0, cap)
@@ -803,13 +834,32 @@ function diffLines(text, sign, cls, cap = 30) {
   if (lines.length > cap) html += `<div class="dline dmute">… ${lines.length - cap} more lines</div>`;
   return html;
 }
+function countLines(text) {
+  const s = String(text ?? "");
+  return s === "" ? 0 : s.replace(/\n$/, "").split("\n").length;
+}
+// "+12 -3" on the line itself: how much of the file changed, without opening it
+function editDelta(e) {
+  const a = e.arguments || {};
+  let added = 0, removed = 0;
+  if (e.tool === "edit_file") { removed = countLines(a.old_string); added = countLines(a.new_string); }
+  else if (e.tool === "write_file" || e.tool === "append_to_file") added = countLines(a.content);
+  else return "";  // "Deleted old_queue.py" already says it; no delta needed
+  const parts = [];
+  if (added) parts.push(`<span class="a">+${added}</span>`);
+  if (removed) parts.push(`<span class="d">-${removed}</span>`);
+  return parts.length ? `<span class="tdelta">${parts.join(" ")}</span>` : "";
+}
 function fileOpBody(e) {
   const a = e.arguments || {};
   if (e.tool === "edit_file")
     return diffLines(a.old_string, "-", "dd") + diffLines(a.new_string, "+", "da");
   if (e.tool === "write_file" || e.tool === "append_to_file")
     return diffLines(a.content, "+", "da");
-  return `<div class="dline dd">- ${esc(a.path || "")}</div>`;
+  // Anything else has no diff to show. It used to fall through to a red
+  // "- <path>" line, which made `Read` look like a deletion and rendered a
+  // bare "- " under `Ran the tests`. The result section fills these in.
+  return "";
 }
 const GATE_LABEL = {
   pasted_code: "caught itself pasting code instead of editing the file",
@@ -849,15 +899,20 @@ function addToolEvents(events) {
     if (e.kind === "tool_call") {
       const card = document.createElement("details"); card.className = "tcard";
       const verb = TOOL_VERBS[e.tool];
-      const subject = FILE_VERBS[e.tool]
-        ? (e.arguments || {}).path || ""
+      const a = e.arguments || {};
+      // a rename's subject is the rename itself, not the file it happened in
+      const subject = NO_SUBJECT.has(e.tool) ? ""
+        : e.tool === "rename_symbol" ? `${a.old_name} → ${a.new_name}  ${a.path || ""}`
+        : FILE_VERBS[e.tool] ? a.path || ""
         : String(primaryArg(e.arguments));
       const head = `<span class="tname">${esc(verb || e.tool)}</span>`
-        + `<span class="targ">${esc(subject)}</span>`;
+        + `<span class="targ">${esc(subject)}</span>${editDelta(e)}`;
       const body = verb
         ? fileOpBody(e)
         : `<div class="sect">arguments</div>${esc(JSON.stringify(e.arguments || {}, null, 1))}`;
-      card.innerHTML = `<summary><span class="glyph">${GLYPHS[e.tool] || "◦"}</span>${head}<span class="tstat">…</span><span class="chev">⌄</span></summary><div class="tbody">${body}</div>`;
+      card.innerHTML = `<summary><span class="glyph">●</span>${head}`
+        + `<span class="spring"></span><span class="tstat">…</span>`
+        + `<span class="chev">⌄</span></summary><div class="tbody">${body}</div>`;
       currentToolBox().appendChild(card);
     } else if (e.kind === "tool_result") {
       const card = lastPendingCard();
@@ -954,8 +1009,12 @@ async function poll(gen, fast) {
       $("#queued-note").textContent = st.queued ? ` · ${st.queued} queued` : "";
     }
 
-    $("#send").disabled = st.status === "working";
-    $("#stop").classList.toggle("on", st.status === "working");
+    // one button in that slot at a time — a greyed-out Send next to a Stop
+    // was the confusing part, not the styling
+    const working = st.status === "working";
+    $("#send").classList.toggle("hidden", working);
+    $("#send").disabled = working;
+    $("#stop").classList.toggle("on", working);
     if (st.pending_approval) { $("#ap-tool").textContent = st.pending_approval.tool; $("#ap-detail").textContent = st.pending_approval.detail; $("#ap-veil").classList.add("on"); }
     else $("#ap-veil").classList.remove("on");
 
