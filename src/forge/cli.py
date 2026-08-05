@@ -451,6 +451,75 @@ def evaluate(
 
 
 @app.command()
+def swebench(
+    limit: int = typer.Option(5, help="How many instances to run."),
+    instance: Optional[str] = typer.Option(None, help="Comma-separated instance ids."),
+    model: Optional[str] = typer.Option(None, help="Model under test."),
+    effort: str = typer.Option("smart", help="fast | smart | genius."),
+    root: Optional[Path] = typer.Option(None, help="Where to clone and evaluate."),
+    out: Optional[Path] = typer.Option(None, help="Write the JSON report here."),
+) -> None:
+    """Run real SWE-bench Lite instances: Forge writes the patch, the official
+    Docker image runs the held-out tests."""
+    from forge.evals.swebench import (
+        DATASET,
+        load_instances,
+        run_swebench,
+    )
+    from forge.evals.swebench import write_report as write_swe_report
+
+    settings = _settings(model)
+    settings.effort = effort
+    ids = [i.strip() for i in instance.split(",")] if instance else None
+    workdir = root or Path(".forge") / "swebench"
+
+    try:
+        instances = load_instances(limit=limit, ids=ids)
+    except Exception as exc:  # noqa: BLE001 — a missing dataset is a user problem
+        console.print(f"[red]Could not load {DATASET}: {exc}[/red]")
+        raise typer.Exit(2) from exc
+    if not instances:
+        console.print("[red]No instances matched.[/red]")
+        raise typer.Exit(2)
+
+    console.print(
+        Panel(
+            f"model [bold]{settings.model}[/bold] · effort [bold]{effort}[/bold] · "
+            f"instances [bold]{len(instances)}[/bold]",
+            title=DATASET,
+        )
+    )
+    console.print(
+        "[dim]Each instance clones a real repository and pulls a ~2GB image "
+        "the first time it is seen.[/dim]"
+    )
+
+    def progress(result) -> None:
+        mark = "[green]RESOLVED[/green]" if result.resolved else "[red]unresolved[/red]"
+        detail = result.error or f"{result.fail_to_pass_passed}/{result.fail_to_pass_total}"
+        console.print(f"  {mark} {result.instance_id} {result.duration_s}s · {detail}")
+
+    report = run_swebench(
+        llm_factory=lambda: _client(settings),
+        settings=settings,
+        root=workdir,
+        instances=instances,
+        on_result=progress,
+    )
+    summary = report.summary()
+    table = Table("metric", "value")
+    table.add_row("resolved", f"{summary['resolved']}/{summary['instances']}")
+    table.add_row("resolved rate", f"{summary['resolved_rate'] * 100:.1f}%")
+    table.add_row("produced a patch", f"{summary['produced_a_patch']}/{summary['instances']}")
+    table.add_row("duration", f"{summary['duration_s']}s")
+    console.print(table)
+
+    destination = out or Path(".forge") / "swebench" / "report.json"
+    write_swe_report(report, destination)
+    console.print(f"[dim]report written to {destination}[/dim]")
+
+
+@app.command()
 def sweep(
     tier: Optional[int] = typer.Option(None, help="Only run tier 1, 2 or 3."),
     model: Optional[str] = typer.Option(None, help="Model under test."),
