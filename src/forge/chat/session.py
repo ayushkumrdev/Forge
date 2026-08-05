@@ -66,6 +66,7 @@ from forge.verify.resolution import (
     self_recursive_errors,
     undefined_call_errors,
     undefined_self_call_errors,
+    unexported_package_errors,
 )
 from forge.verify.search import _search_temperatures, search
 
@@ -1026,6 +1027,19 @@ class ChatSession:
         problems: list[str] = []
         for path, original in self.ledger.originals.items():
             if original is None or path.suffix != ".py" or not path.is_file():
+                # A package Forge CREATED this session whose __init__.py
+                # exports nothing is broken for everyone who imports it, and
+                # only a newly created one is judged: an existing package is
+                # entitled to be a namespace whose callers import submodules.
+                if original is None and path.name == "__init__.py" and path.is_file():
+                    try:
+                        source = path.read_text(encoding="utf-8-sig", errors="replace")
+                    except OSError:
+                        continue
+                    problems.extend(
+                        f"{path.parent.name}/__init__.py: {issue}"
+                        for issue in unexported_package_errors(path, source)
+                    )
                 continue
             try:
                 current = path.read_text(encoding="utf-8-sig", errors="replace")

@@ -11,6 +11,7 @@ from forge.verify.resolution import (
     resolution_errors,
     self_recursive_errors,
     undefined_call_errors,
+    unexported_package_errors,
 )
 
 # -- L2 resolution ---------------------------------------------------------------
@@ -978,3 +979,90 @@ def test_neither_new_detector_fires_on_forge_s_own_source():
             for problem in detector(path.read_text(encoding="utf-8"))
         ]
         assert findings == [], f"{detector.__name__}: {findings}"
+
+
+# -- a package that exports nothing -----------------------------------------------
+# From a build-from-scratch trace, on both seeds: Forge wrote mathkit/primes.py
+# with is_prime and primes_up_to, and a __init__.py containing `__all__ = []`
+# and no imports. Everything parses, every import inside the package resolves,
+# and `from mathkit import is_prime` — the only way anyone uses it — fails.
+
+
+def _package(tmp_path, init_source, module_source="def is_prime(n):\n    return n > 1\n"):
+    pkg = tmp_path / "mathkit"
+    pkg.mkdir()
+    (pkg / "primes.py").write_text(module_source, encoding="utf-8")
+    init = pkg / "__init__.py"
+    init.write_text(init_source, encoding="utf-8")
+    return init, init_source
+
+
+def test_an_init_that_imports_nothing_is_reported(tmp_path):
+    init, source = _package(tmp_path, "# mathkit package\n__all__ = []\n")
+    problems = unexported_package_errors(init, source)
+    assert len(problems) == 1
+    assert "is_prime" in problems[0] and "ImportError" in problems[0]
+
+
+def test_re_exporting_satisfies_it(tmp_path):
+    init, source = _package(tmp_path, "from mathkit.primes import is_prime\n")
+    assert unexported_package_errors(init, source) == []
+
+
+def test_a_package_with_no_public_names_is_left_alone(tmp_path):
+    init, source = _package(tmp_path, "", module_source="def _helper():\n    return 1\n")
+    assert unexported_package_errors(init, source) == []
+
+
+def test_an_existing_package_is_never_judged(workspace):
+    """Forge's own forge/__init__.py exports nothing and is correct — callers
+    import submodules. Only a package created THIS session is judged, because
+    a namespace package is a real and common style."""
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage, ToolCall
+    from forge.llm.mock import MockLLMClient
+
+    pkg = workspace / "existing"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    (pkg / "core.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "existing/core.py", "content": "def run():\n    return 2\n"})]),
+        ChatMessage(role="assistant", content="Bumped it."),
+    ])
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="ns")
+    session.send("make run return 2")
+    assert not any("ImportError" in m.content for m in session.history)
+
+
+def test_a_package_created_this_session_is_caught(workspace):
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage, ToolCall
+    from forge.llm.mock import MockLLMClient
+
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "mathkit/primes.py",
+                       "content": "def is_prime(n):\n    return n > 1\n"})]),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "mathkit/__init__.py", "content": "__all__ = []\n"})]),
+        ChatMessage(role="assistant", content="Built the package."),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "mathkit/__init__.py",
+                       "content": "from mathkit.primes import is_prime\n"})]),
+        ChatMessage(role="assistant", content="Exported it."),
+    ] + [ChatMessage(role="assistant", content="Done.")] * 6)
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="mk")
+    session.send("create a mathkit package that exports is_prime")
+    assert any("ImportError" in m.content for m in session.history)
+    assert "from mathkit.primes import is_prime" in (
+        workspace / "mathkit" / "__init__.py"
+    ).read_text(encoding="utf-8")

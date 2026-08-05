@@ -576,6 +576,66 @@ def undefined_call_errors(source: str) -> list[str]:
     ]
 
 
+def _public_definitions(source: str) -> list[str]:
+    """Top-level functions and classes a module offers to importers."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    return [
+        node.name
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef)
+        and not node.name.startswith("_")
+    ]
+
+
+def unexported_package_errors(init_path: Path, source: str) -> list[str]:
+    """A package whose __init__.py exports nothing its modules define.
+
+    Observed live, on both seeds of a build-from-scratch task: Forge created
+    `mathkit/primes.py` with is_prime and primes_up_to, and a `__init__.py`
+    containing `__all__ = []` and no imports at all. Everything parses, every
+    import inside the package resolves, and `from mathkit import is_prime` —
+    the only way anyone will actually use it — raises ImportError.
+
+    Deliberately only for an __init__.py this session CREATED. A package that
+    was already in the repository is entitled to be a namespace whose callers
+    import submodules directly; that is a real and common style, and judging
+    it would be inventing work nobody asked for."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            imported.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.Import):
+            imported.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+    if imported:
+        return []
+
+    package = init_path.parent
+    offered: list[str] = []
+    for sibling in sorted(package.glob("*.py")):
+        if sibling.name == "__init__.py":
+            continue
+        try:
+            offered += _public_definitions(sibling.read_text(encoding="utf-8-sig"))
+        except OSError:
+            continue
+    if not offered:
+        return []
+    names = ", ".join(offered[:6])
+    return [
+        f"line 1: '{package.name}/__init__.py' imports nothing, so "
+        f"'from {package.name} import {offered[0]}' raises ImportError — "
+        f"{package.name} defines {names} in its modules but the package "
+        f"exports none of them"
+    ]
+
+
 def resolution_errors(
     file_path: Path, source: str, workspace: Path, max_reported: int = 4
 ) -> list[str]:
