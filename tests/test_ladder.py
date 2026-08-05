@@ -1066,3 +1066,48 @@ def test_a_package_created_this_session_is_caught(workspace):
     assert "from mathkit.primes import is_prime" in (
         workspace / "mathkit" / "__init__.py"
     ).read_text(encoding="utf-8")
+
+
+# -- a package is built over several writes ---------------------------------------
+# Measured: the model wrote mathkit/__init__.py, then
+# `from .primes import is_prime, primes_up_to` — which is CORRECT, and was
+# refused because primes.py was still one write away. Three rejected writes
+# later it settled for `from . import primes`, which exports nothing.
+
+
+def test_a_new_packages_init_may_import_a_sibling_not_yet_written(tmp_path):
+    pkg = tmp_path / "mathkit"
+    pkg.mkdir()
+    init = pkg / "__init__.py"
+    source = "from .primes import is_prime, primes_up_to\n"
+    init.write_text(source, encoding="utf-8")
+    assert resolution_errors(init, source, tmp_path) == []
+
+
+def test_an_established_package_is_still_checked(tmp_path):
+    """Once the package holds other modules it is not under construction, and
+    a relative import that does not resolve is a hallucination again."""
+    pkg = tmp_path / "mathkit"
+    pkg.mkdir()
+    (pkg / "primes.py").write_text("def is_prime(n):\n    return n > 1\n", encoding="utf-8")
+    init = pkg / "__init__.py"
+    problems = resolution_errors(init, "from .ghost import thing\n", tmp_path)
+    assert problems and "does not resolve" in problems[0]
+
+
+def test_an_ordinary_module_is_never_relaxed(tmp_path):
+    """Only the package's own __init__.py gets the forward reference."""
+    pkg = tmp_path / "mathkit"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("", encoding="utf-8")
+    module = pkg / "inner.py"
+    problems = resolution_errors(module, "from .ghost import thing\n", tmp_path)
+    assert problems and "does not resolve" in problems[0]
+
+
+def test_a_relative_import_climbing_out_of_the_tree_is_still_wrong(tmp_path):
+    pkg = tmp_path / "mathkit"
+    pkg.mkdir()
+    init = pkg / "__init__.py"
+    problems = resolution_errors(init, "from ...far.away import thing\n", tmp_path)
+    assert problems and "does not resolve" in problems[0]

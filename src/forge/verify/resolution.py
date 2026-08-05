@@ -636,6 +636,38 @@ def unexported_package_errors(init_path: Path, source: str) -> list[str]:
     ]
 
 
+def _is_package_under_construction(file_path: Path, workspace: Path, level: int) -> bool:
+    """Whether a relative import names a sibling the agent has yet to write.
+
+    The distinction that matters is established package versus one being
+    built. `from .ghost import thing` inside a package that already holds
+    other modules is a hallucination and stays an error. The same line inside
+    a package holding nothing but the __init__.py currently being written is
+    a forward reference, and the module is one write away.
+
+    The folder must also still be inside the workspace, so a relative import
+    climbing out of the tree is wrong however the work is ordered.
+    """
+    # Only the package's own __init__.py, importing a direct sibling. That is
+    # the shape that was measured, and it keeps every ordinary module fully
+    # checked: a bad relative import in pkg/inner.py is still an error.
+    if file_path.name != "__init__.py" or level != 1:
+        return False
+    folder = file_path.parent
+    if not folder.is_dir():
+        return False
+    try:
+        folder.resolve().relative_to(workspace.resolve())
+    except ValueError:
+        return False
+    siblings = [
+        entry
+        for entry in folder.glob("*.py")
+        if entry.name != "__init__.py" and entry != file_path
+    ]
+    return not siblings
+
+
 def resolution_errors(
     file_path: Path, source: str, workspace: Path, max_reported: int = 4
 ) -> list[str]:
@@ -656,6 +688,19 @@ def resolution_errors(
         if ref.level > 0:
             target = index.resolve_relative(file_path, ref.level, ref.module)
             if target is None:
+                # A package is built over several writes, and the honest
+                # order is often __init__.py first: `from .primes import
+                # is_prime` is CORRECT while primes.py is still one write
+                # away. Refusing it here forced the model into
+                # `from . import primes`, which exports nothing — measured,
+                # three rejected writes in a row before it gave up.
+                #
+                # Same rule this project already learned for renames: never
+                # gate an inherently multi-step operation at each step. The
+                # sibling that never materialises is caught at turn end by
+                # the import rung, which sees the finished state.
+                if _is_package_under_construction(file_path, workspace, ref.level):
+                    continue
                 dots = "." * ref.level
                 problems.append(
                     f"line {ref.line}: relative import '{dots}{ref.module}' does not "
