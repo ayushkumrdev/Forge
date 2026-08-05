@@ -15,6 +15,7 @@ import re
 import sys
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 from forge.agents.base import constrained_tool_retry, recover_inline_tool_call
 from forge.chat.formatting import normalize_markdown
@@ -353,6 +354,18 @@ def claims_verification(content: str) -> bool:
         if _FALSE_VERIFICATION_RE.search(sentence) and not _DISCLAIMER_RE.search(sentence):
             return True
     return False
+class _CheckRun(NamedTuple):
+    command: str
+    output: str
+
+
+_REAL_OUTPUT_NUDGE = (
+    "You said the checks had run, but no command had been issued this turn — "
+    "so they have been run for you now.\n\n$ {command}\n{output}\n\n"
+    "Rewrite your summary so it matches this output exactly. If it shows "
+    "failures, say so and fix them; never describe a result you did not see."
+)
+
 _FALSE_CLAIM_NUDGE = (
     "You claimed the tests/checks ran, but you did NOT run any command this "
     "turn. Run them NOW with run_command and report the actual output — or "
@@ -516,6 +529,7 @@ class ChatSession:
         genius_checked = False
         coverage_passes = 0
         dangling_passes = 0
+        verified_for_real = False
         requirements: list[Requirement] | None = None
         commands_run: list[str] = []
         # the evaluation harness reconstructs per-turn behaviour from the trace
@@ -713,6 +727,26 @@ class ChatSession:
                             if self.settings.gate_false_verification
                             else None
                         )
+                        # Telling the model it did not run anything does not
+                        # make it run anything: it rephrases, twice, and then
+                        # the nudge budget is gone and the claim ships. One
+                        # reply invented a terminal transcript — "$ python -m
+                        # unittest discover / Ran 2 tests / OK" — for a
+                        # command that was never issued.
+                        #
+                        # So run it. Forge has the tool, the checks are the
+                        # user's own, and a claim of verification is exactly
+                        # the moment verification should happen. Hand the
+                        # model the real output instead of arguing with it.
+                        if correction and not verified_for_real:
+                            verified_for_real = True
+                            actual = self._run_the_checks()
+                            if actual:
+                                turn_ran_command = True
+                                commands_run.append(actual.command)
+                                correction = _REAL_OUTPUT_NUDGE.format(
+                                    command=actual.command, output=actual.output
+                                )
                 if violation:
                     self.recorder.event(
                         "chat",
@@ -1260,6 +1294,29 @@ class ChatSession:
                 )
         self.recorder.event("chat", "focused_pass_done", ok=changed)
         return changed
+
+    def _run_the_checks(self) -> _CheckRun | None:
+        """Run the project's tests, because the model said it already had.
+
+        Returns None when there is nothing to run — a repository with no
+        suite cannot be verified this way, and inventing a result would be
+        the very thing this is here to stop."""
+        self.recorder.event("chat", "verification_enforced")
+        try:
+            result = self.registry.execute("run_tests", {})
+        except Exception:  # noqa: BLE001 — never let this kill the turn
+            return None
+        output = (result.output if result.ok else result.error) or ""
+        if not output.strip() or "no test" in output.lower():
+            return None
+        self.recorder.event(
+            "chat", "tool_result", tool="run_tests", ok=result.ok,
+            output=output[:400] if result.ok else None,
+            error=None if result.ok else output[:400],
+        )
+        return _CheckRun(
+            command="run_tests", output=output[: self.settings.max_tool_output_chars]
+        )
 
     def _interpret(self, user_text: str, action_turn: bool = True) -> str:
         """Two-model brain: the thinker model turns the raw message into a

@@ -447,3 +447,66 @@ def test_noun_heavy_words_do_not_arm_the_gate():
         "the export runs nightly",
     ]:
         assert not is_action_request(text), text
+
+
+# -- a claim of verification is when verification should happen -------------------
+# From the full-suite report: 11 of 30 runs ended with a claim no command
+# backed. One reply invented a terminal transcript — "$ python -m unittest
+# discover / Ran 2 tests in 0.010s / OK" — for a command never issued. The
+# nudge existed and did not help: told it had run nothing, the model
+# rephrased, twice, and then the budget was gone and the claim shipped.
+
+
+def test_a_false_claim_makes_forge_run_the_checks_itself(workspace):
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage, ToolCall
+    from forge.llm.mock import MockLLMClient
+
+    (workspace / "stats.py").write_text("def average(v):\n    return sum(v)\n", "utf-8")
+    (workspace / "test_stats.py").write_text(
+        "from stats import average\n\n\ndef test_it():\n    assert average([2, 4]) == 6\n",
+        encoding="utf-8",
+    )
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "stats.py", "content": "def average(v):\n    return sum(v)\n"})]),
+        # the fabrication, verbatim in shape
+        ChatMessage(role="assistant", content=(
+            "- **Action**: Running the project's tests to verify the change.\n"
+            "- **Output**:\n```\n$ python -m unittest discover\nRan 2 tests OK\n```"
+        )),
+        ChatMessage(role="assistant", content="The suite really does pass — 1 test."),
+    ] + [ChatMessage(role="assistant", content="Done.")] * 4)
+    settings = ForgeSettings(gate_intent_brief=False)
+    session = ChatSession(workspace, llm, settings, session_id="fv")
+    session.send("make average return the mean")
+
+    # the real output was put in front of the model, not another lecture
+    handed_back = [m.content for m in session.history if "have been run for you" in m.content]
+    assert handed_back, "Forge did not run the checks it was told had run"
+    assert "$ run_tests" in handed_back[0]
+
+
+def test_nothing_is_invented_when_there_is_no_suite(workspace):
+    """A repository with no tests cannot be verified this way, and making
+    something up is the exact failure this is here to stop."""
+    from forge.chat.session import ChatSession
+    from forge.config import ForgeSettings
+    from forge.llm.base import ChatMessage, ToolCall
+    from forge.llm.mock import MockLLMClient
+
+    (workspace / "app.py").write_text("x = 1\n", encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file", arguments={"path": "app.py", "content": "x = 2\n"})]),
+        ChatMessage(role="assistant", content="I ran the tests and they all passed."),
+        ChatMessage(role="assistant", content="I did not actually run anything."),
+    ] + [ChatMessage(role="assistant", content="Done.")] * 4)
+    settings = ForgeSettings(gate_intent_brief=False)
+    session = ChatSession(workspace, llm, settings, session_id="fv2")
+    session.send("set x to 2 in app.py")
+    assert not any("have been run for you" in m.content for m in session.history)
+    # it still gets told off, it just is not handed a fabricated result
+    assert any("did NOT run any command" in m.content for m in session.history)
