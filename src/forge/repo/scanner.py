@@ -43,6 +43,11 @@ class RepoSnapshot(BaseModel):
     language_stats: dict[str, int]  # language -> line count
     graph: ImportGraph = Field(default_factory=ImportGraph)
 
+    @property
+    def is_empty(self) -> bool:
+        """No source files yet — a project to build rather than change."""
+        return not self.files
+
     def file(self, path: str) -> FileInfo | None:
         return next((f for f in self.files if f.path == path), None)
 

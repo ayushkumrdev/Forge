@@ -127,10 +127,11 @@ def test_aggregate_reports_n_and_skips_unobserved():
 
 def test_suite_is_tiered_and_selectable():
     assert len(SUITE) >= 10
-    # four rungs: single edit, several requirements, cross-file, repo-level
-    assert {t.tier for t in SUITE} == {1, 2, 3, 4}
+    # five rungs: single edit, several requirements, cross-file,
+    # repo-level, and greenfield — the last starts from an empty folder
+    assert {t.tier for t in SUITE} == {1, 2, 3, 4, 5}
     # every rung needs enough tasks for a rate to mean anything
-    for tier in (1, 2, 3, 4):
+    for tier in (1, 2, 3, 4, 5):
         assert len(tasks(tier=tier)) >= 2
     assert all(t.id for t in SUITE)
     assert len({t.id for t in SUITE}) == len(SUITE)  # ids unique

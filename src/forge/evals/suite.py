@@ -557,6 +557,107 @@ _T4_FEATURE = Task(
 )
 
 
+# --------------------------------------------------------------------------
+# T5 — greenfield: nothing exists yet
+#
+# Every other tier hands the agent a repository to change. This one hands it
+# an empty directory, which is a different problem: there is no file tree to
+# ground against, no existing style to match, and no symbol to read before
+# editing. "Build me a project" is the thing users actually ask for, and it
+# was the one thing the benchmark never measured.
+# --------------------------------------------------------------------------
+
+_T5_BUILD_TEXTSTATS = Task(
+    id="t5-build-textstats",
+    tier=5,
+    request=(
+        "This folder is empty. Build a small text-statistics tool. "
+        "textstats.py needs word_count(text), returning a dict of lowercased "
+        "word to count with punctuation stripped, and top_words(text, n), "
+        "returning the n most common as (word, count) pairs sorted by count "
+        "descending and then alphabetically. cli.py needs main(argv) that "
+        "takes one file path and returns the top 3 as lines of 'word: count'."
+    ),
+    files={},
+    check=(
+        "import textstats\n"
+        "from cli import main\n\n\n"
+        "def test_word_count_is_lowercased_and_depunctuated():\n"
+        "    assert textstats.word_count('Hello, hello world!') == "
+        "{'hello': 2, 'world': 1}\n\n\n"
+        "def test_top_words_breaks_ties_alphabetically():\n"
+        "    assert textstats.top_words('b b a a c', 2) == [('a', 2), ('b', 2)]\n\n\n"
+        "def test_cli_returns_the_top_three(tmp_path):\n"
+        "    sample = tmp_path / 'sample.txt'\n"
+        "    sample.write_text('x x x y y z', encoding='utf-8')\n"
+        "    assert main([str(sample)]).splitlines() == ['x: 3', 'y: 2', 'z: 1']\n"
+    ),
+    solution={
+        "textstats.py": (
+            "import re\n"
+            "from collections import Counter\n\n\n"
+            "def word_count(text):\n"
+            "    words = re.findall(r\"[a-z0-9']+\", text.lower())\n"
+            "    return dict(Counter(words))\n\n\n"
+            "def top_words(text, n):\n"
+            "    counts = word_count(text)\n"
+            "    return sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:n]\n"
+        ),
+        "cli.py": (
+            "import sys\n\n"
+            "from textstats import top_words\n\n\n"
+            "def main(argv=None):\n"
+            "    argv = list(sys.argv[1:] if argv is None else argv)\n"
+            "    with open(argv[0], encoding='utf-8') as handle:\n"
+            "        text = handle.read()\n"
+            "    return '\\n'.join(f'{word}: {count}' "
+            "for word, count in top_words(text, 3))\n"
+        ),
+    },
+    tags=("greenfield", "multi-file"),
+)
+
+_T5_BUILD_PACKAGE = Task(
+    id="t5-build-package",
+    tier=5,
+    request=(
+        "This folder is empty. Create a Python package called mathkit: an "
+        "__init__.py that exports is_prime and primes_up_to, and a primes.py "
+        "inside the package that implements them. is_prime(n) is False for "
+        "any n below 2. primes_up_to(n) returns every prime up to and "
+        "including n, in order."
+    ),
+    files={},
+    check=(
+        "from mathkit import is_prime, primes_up_to\n\n\n"
+        "def test_is_prime():\n"
+        "    assert is_prime(2) and is_prime(13)\n"
+        "    assert not is_prime(0) and not is_prime(1) and not is_prime(9)\n\n\n"
+        "def test_primes_up_to():\n"
+        "    assert primes_up_to(10) == [2, 3, 5, 7]\n"
+        "    assert primes_up_to(1) == []\n"
+    ),
+    solution={
+        "mathkit/__init__.py": (
+            "from mathkit.primes import is_prime, primes_up_to\n\n"
+            "__all__ = ['is_prime', 'primes_up_to']\n"
+        ),
+        "mathkit/primes.py": (
+            "def is_prime(n):\n"
+            "    if n < 2:\n"
+            "        return False\n"
+            "    for candidate in range(2, int(n ** 0.5) + 1):\n"
+            "        if n % candidate == 0:\n"
+            "            return False\n"
+            "    return True\n\n\n"
+            "def primes_up_to(n):\n"
+            "    return [value for value in range(2, n + 1) if is_prime(value)]\n"
+        ),
+    },
+    tags=("greenfield", "package"),
+)
+
+
 SUITE: tuple[Task, ...] = (
     _T1_ADD_FUNCTION,
     _T1_FIX_BUG,
@@ -568,6 +669,8 @@ SUITE: tuple[Task, ...] = (
     _T3_RENAME,
     _T4_FAILING_TEST,
     _T4_FEATURE,
+    _T5_BUILD_TEXTSTATS,
+    _T5_BUILD_PACKAGE,
 )
 
 

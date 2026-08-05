@@ -19,6 +19,41 @@ from forge.tools.edit_repair import (
 from forge.tools.syntax_check import gate_edit
 from forge.verify.ladder import Ladder
 
+_NEIGHBOURS_SHOWN = 12
+
+
+def _missing_file(guard: SafetyGuard, resolved: Path, path: str) -> str:
+    """"Not found" plus what IS there — a dead end turned into grounding.
+
+    A bare "File not found" leaves the model guessing, and it guesses the
+    same wrong path again: on an empty folder it read cli.py four times in
+    one run before giving up. Naming the folder's real contents ends that,
+    and on a genuinely empty folder it says so outright, which is the fact
+    the model most needs and cannot otherwise discover without a tool call
+    it has been told not to make."""
+    folder = resolved.parent
+    listing = ""
+    if folder.is_dir():
+        names = sorted(
+            entry.name + ("/" if entry.is_dir() else "")
+            for entry in folder.iterdir()
+            if not entry.name.startswith(".")
+        )
+        where = "This folder" if folder == guard.workspace else f"'{folder.name}'"
+        if names:
+            shown = ", ".join(names[:_NEIGHBOURS_SHOWN])
+            if len(names) > _NEIGHBOURS_SHOWN:
+                shown += f", … {len(names) - _NEIGHBOURS_SHOWN} more"
+            listing = f" {where} contains: {shown}."
+        else:
+            listing = f" {where} is empty — nothing has been created in it yet."
+    elif not folder.exists():
+        listing = f" The folder '{folder.name}' does not exist either."
+    return (
+        f"File not found: {path}.{listing} "
+        "Use write_file to create a file that does not exist yet."
+    )
+
 
 def _write_exact(path: Path, content: str) -> None:
     r"""Write content without translating newlines, keeping the file's own
@@ -108,7 +143,7 @@ class ReadFileTool(Tool):
     def run(self, path: str, offset: int = 1, limit: int = 2000) -> ToolResult:
         resolved = self._guard.resolve_path(path)
         if not resolved.exists():
-            return ToolResult(ok=False, error=f"File not found: {path}")
+            return ToolResult(ok=False, error=_missing_file(self._guard, resolved, path))
         if resolved.is_dir():
             return ToolResult(ok=False, error=f"{path} is a directory; use list_dir.")
         # utf-8-sig strips Windows BOMs so the model never sees ﻿ artifacts
@@ -240,7 +275,9 @@ class EditFileTool(Tool):
                 "that already exists, copy it exactly into old_string.",
             )
         if not resolved.exists():
-            return ToolResult(ok=False, error=f"File not found: {path}")
+            return ToolResult(
+                ok=False, error=_missing_file(self._guard, resolved, path)
+            )
         content = resolved.read_text(encoding="utf-8-sig", errors="replace")
 
         # Self-repairing match: exact, else whitespace-tolerant, else grounded
@@ -357,8 +394,7 @@ class AppendFileTool(Tool):
         resolved = self._guard.check_write_path(path)
         if not resolved.exists():
             return ToolResult(
-                ok=False,
-                error=f"File not found: {path}. Use write_file to create it.",
+                ok=False, error=_missing_file(self._guard, resolved, path)
             )
         if resolved.is_dir():
             return ToolResult(ok=False, error=f"{path} is a directory.")

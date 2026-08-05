@@ -1,5 +1,12 @@
+from forge.safety.guard import SafetyGuard
 from forge.tools.changes import ChangeLedger
-from forge.tools.filesystem import EditFileTool, ListDirTool, ReadFileTool, WriteFileTool
+from forge.tools.filesystem import (
+    AppendFileTool,
+    EditFileTool,
+    ListDirTool,
+    ReadFileTool,
+    WriteFileTool,
+)
 
 
 def test_write_then_read_roundtrip(guard, ledger, workspace):
@@ -91,3 +98,51 @@ def test_read_missing_file(guard):
     result = ReadFileTool(guard).run(path="nope.txt")
     assert not result.ok
     assert "not found" in result.error.lower()
+
+
+# -- a dead end turned into grounding ---------------------------------------------
+# From a greenfield trace: asked to build in an empty folder, the model read
+# cli.py four times in one run, each answered with a bare "File not found",
+# and never learned the folder was empty. Half of all tool calls failed.
+
+
+def test_reading_a_missing_file_in_an_empty_folder_says_so(workspace):
+    tool = ReadFileTool(SafetyGuard(workspace))
+    result = tool.run(path="cli.py")
+    assert not result.ok
+    assert "is empty" in result.error
+    assert "write_file" in result.error
+
+
+def test_reading_a_missing_file_names_what_is_actually_there(workspace):
+    (workspace / "textstats.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "README.md").write_text("hi\n", encoding="utf-8")
+    result = ReadFileTool(SafetyGuard(workspace)).run(path="cli.py")
+    assert not result.ok
+    assert "textstats.py" in result.error and "README.md" in result.error
+
+
+def test_a_missing_folder_is_reported_as_missing(workspace):
+    result = ReadFileTool(SafetyGuard(workspace)).run(path="mathkit/primes.py")
+    assert not result.ok
+    assert "mathkit" in result.error
+
+
+def test_dotfiles_are_not_listed_as_neighbours(workspace):
+    """.forge is Forge's own bookkeeping and only adds noise."""
+    (workspace / ".forge").mkdir()
+    (workspace / "app.py").write_text("x = 1\n", encoding="utf-8")
+    result = ReadFileTool(SafetyGuard(workspace)).run(path="nope.py")
+    assert "app.py" in result.error and ".forge" not in result.error
+
+
+def test_append_and_edit_give_the_same_grounding(workspace, ledger):
+    (workspace / "there.py").write_text("x = 1\n", encoding="utf-8")
+    for result in (
+        AppendFileTool(SafetyGuard(workspace), ledger).run(path="gone.py", content="y = 2\n"),
+        EditFileTool(SafetyGuard(workspace), ledger).run(
+            path="gone.py", old_string="a", new_string="b"
+        ),
+    ):
+        assert not result.ok
+        assert "there.py" in result.error

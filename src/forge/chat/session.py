@@ -254,6 +254,28 @@ _FILE_MUTATING_TOOLS = frozenset(
     {"write_file", "edit_file", "append_to_file", "delete_file", "rename_symbol"}
 )
 
+# Appended to the system prompt when the folder has no source files in it.
+# Everything above it assumes a repository to change; none of that applies.
+_GREENFIELD = """
+
+## This folder is EMPTY — you are building, not editing
+There is nothing to read, nothing to grep, and no existing style to match.
+Do NOT list the directory or search for files: you already know it is empty.
+
+1. Decide the files. Keep it to the few the request actually needs — one
+   module per idea, plus an entry point only if one was asked for.
+2. write_file each one, complete, in one call. Never write a stub and come
+   back to it; never leave a TODO in place of the code.
+3. A package means a directory with an __init__.py that exports the names
+   users import. write_file creates the directories for you: writing
+   `pkg/thing.py` makes `pkg/` on the way.
+4. Anything you import must exist. If module A calls something in module B,
+   write B first, and import it by the exact name you gave it.
+5. When the files are written, verify: run_tests if you were asked for
+   tests, otherwise run_command `python -c "import <module>"` on each module
+   you created, and fix what the error says. Do not report success until an
+   import or a test has actually run."""
+
 _GENIUS_CHECK = (
     "Final completeness check: re-read the user's ORIGINAL request at the "
     "start of this turn. If ANY part of it is not done or not verified, do "
@@ -385,6 +407,12 @@ class ChatSession:
             f"Python {sys.version.split()[0]} · shell tools: {shells}. "
             "Use the right syntax for this OS."
             + f"\n\n## Repository ({self.workspace})\n{tree}"
+            # An empty folder is a different job, and the instructions above
+            # are all wrong for it: there is nothing to read before editing,
+            # no existing style to match, and no symbol to look up. Left
+            # unsaid, the model burns its budget listing an empty directory
+            # and searching for files that were never there.
+            + (_GREENFIELD if self.snapshot.is_empty else "")
         )
         instructions = load_project_instructions(self.workspace)
         if instructions:
