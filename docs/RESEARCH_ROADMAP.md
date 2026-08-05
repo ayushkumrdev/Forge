@@ -824,7 +824,61 @@ just built** — and none of them can be caught by reading it. Two independent
 tiers now point at the same next contribution, which is the strongest signal
 in this document for what to build next.
 
-**Running total: twenty-nine defects, twenty-eight outside the model.**
+### 3.5l Greenfield scores — and both fixes were Forge getting out of the way
+
+Two more defects, and neither was a missing check. Both were Forge's own
+machinery breaking work that would otherwise have succeeded.
+
+**Plan-first was actively harmful here.** The decomposer turned one small
+package into six requirements — "a Python package named mathkit is created",
+"__init__.py file exists inside the mathkit package" — each executed in its
+own isolated clean context. They fought: one step created a stray
+`__init__.py` at the repo root and worked on that, another appended the bare
+word `primes_up_to` as a line of code. A directory, its module and its
+exports are **facets of one artifact**, not independent outcomes, and
+isolating them destroys the coherence authoring needs.
+
+This is the first mechanism in this project that had to be **limited rather
+than extended**, and it sharpens the plan-first claim considerably:
+decomposition helps when requirements are *independent* (two renames: 0/3 →
+3/3) and hurts when they are facets of one thing. A greenfield tier is what
+exposed the boundary; nothing in tiers 1-4 could have.
+
+**And L2 was punishing correct code.** The trace is unambiguous:
+
+```
+write mathkit/__init__.py ""                          ok
+write "from .primes import is_prime, primes_up_to"    REJECTED
+write "from primes import is_prime, primes_up_to"     REJECTED
+write "from . import primes"                          ok
+write mathkit/primes.py                               ok
+```
+
+The rejected line was right; `primes.py` was one write away. L2 asks whether
+an import resolves *right now*, and a package is built over several writes.
+Refused twice, the model settled for `from . import primes`, which exports
+nothing — **so Forge caused the empty-package failure that its own new check
+then reported.** Third time this project has paid for the same rule: never
+gate an inherently multi-step operation at each step.
+
+**Result — the greenfield tier scores for the first time: 1/4**, and every
+behavioural metric is the best recorded:
+
+| | TSR | tool reliability | wasted cycle | tool calls |
+|---|---|---|---|---|
+| baseline | 0/2 | 50% | 34% | 44 |
+| + grounding, no split | 0/4 | 71% | 6% | 17 |
+| + forward reference | **1/4** | **86%** | 8% | 16 |
+
+`t5-build-package` passed in **three tool calls and 35 seconds**, producing
+exactly `from .primes import is_prime, primes_up_to` — the line that had
+been rejected. A clean causal chain from defect to fix to pass.
+
+**Running total: thirty-one defects, thirty outside the model.** The two most
+recent are the most interesting of the set, because neither was a missing
+verification. Both were verification machinery misfiring on work it did not
+understand, which is a failure mode a paper about verification-as-capability
+has an obligation to report.
 
 ### 3.6 What the first numbers already tell us
 
