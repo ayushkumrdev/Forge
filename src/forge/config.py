@@ -54,9 +54,20 @@ class ForgeSettings(BaseSettings):
     gate_import_check: bool = True
     # Reason about the request before changing anything. With FORGE_THINKER_MODEL
     # set, that model writes the brief; with one model, the model briefs itself.
-    # Costs one call per action turn and is what the UI shows as the chain of
-    # thought — without it Forge goes straight from the request to an edit.
-    gate_intent_brief: bool = True
+    #
+    # OFF by default, and that is a measured decision rather than a taste.
+    # Turning it on for smart effort cost t3-wire-validator 2/3 -> 0/3, took
+    # false verification from 14.3% to 47.6%, and dropped act-don't-tell from
+    # 100% to 94.3% — three independent signals moving together. It reproduces
+    # what NL2Repo-Bench reports for reasoning-first agents: "a
+    # self-reinforcing echo chamber where the model convinces itself of
+    # correctness". A 7B that reasons about the work before doing it talks
+    # itself into having done it.
+    #
+    # A configured FORGE_THINKER_MODEL is a different proposition — a separate
+    # model briefing the coder is not the same as a model briefing itself —
+    # and that path is still available by setting this on.
+    gate_intent_brief: bool = False
     # Re-ask malformed tool calls under a JSON schema
     gate_constrained_retry: bool = True
     # L2 of the verification ladder: imports and imported names must resolve

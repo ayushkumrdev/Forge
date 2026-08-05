@@ -326,7 +326,40 @@ recovery could not parse it without a name field, and steps ended having done
 nothing. Cost: tool calls per run 3–4 → 1, tool reliability 92% → 75%, **task
 success rate unchanged**, which is why it went unnoticed.
 
-### 6.5 A metric that catches what TSR hides (ESR)
+### 6.5 A predicted negative result, confirmed on our own harness
+
+Late in the campaign we enabled self-briefing — the model reasons about the
+request before changing anything — for the default effort level. It is an
+appealing mechanism and it is what the UI shows as a chain of thought. We
+then found NL2Repo-Bench's report that reasoning-first agents *underperform*,
+describing "a self-reinforcing echo chamber where the model convinces itself
+of correctness", and flagged our own change as suspect rather than as an
+improvement.
+
+Ablating it on the three tasks that had regressed:
+
+| | brief on | brief off |
+| --- | --- | --- |
+| t3-wire-validator | 0/3 | **2/3** |
+| false verification | 47.6% | **14.3%** |
+| act-don't-tell | 94.3% | **100%** |
+
+Three independent signals move together, which is a far stronger result than
+the single task delta. **A 7B that reasons about work before doing it talks
+itself into having done it** — the mechanism does not merely fail to help, it
+directly feeds the honesty failure mode that is this system's worst metric.
+The gate now defaults off, and the default carries the measurement in a
+comment beside it.
+
+We keep the distinction the experiment does not settle: a *separate* thinker
+model briefing the coder is not the same proposition as a model briefing
+itself, and that path remains available.
+
+This is also the clearest instance of the methodological point in §5. The
+mechanism was plausible, it was already shipped, and only an ablation
+distinguished "this helps" from "this is the reason three tasks regressed".
+
+### 6.6 A metric that catches what TSR hides (ESR)
 
 Empty-step rate — the share of focused steps that changed nothing — was added
 after a regression scored 100% tool reliability, 0% wasted cycles and 100%
