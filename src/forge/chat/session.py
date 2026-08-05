@@ -549,6 +549,17 @@ class ChatSession:
             and self.settings.gate_plan_first
             and self.effort != "fast"
             and looks_multi_requirement(user_text)
+            # ...but NOT when building from nothing. Plan-first helps when
+            # requirements are independent — two renames in one file went
+            # 0/3 to 3/3 on it. A new package is the opposite: the directory,
+            # its module and its exports are facets of ONE artifact, and
+            # splitting them into isolated clean-context steps destroys the
+            # coherence that authoring needs. Measured: the decomposer turned
+            # one small package into six requirements ("a package is
+            # created", "__init__.py exists"), which then fought each other —
+            # one step created a stray __init__.py at the repo root, another
+            # appended a bare name as a line of code.
+            and not self.snapshot.is_empty
         ):
             requirements = decompose(self._thinker or self.llm, user_text, self.usage)
             if len(requirements) > 1:

@@ -107,3 +107,49 @@ def test_the_rung_can_be_switched_off(workspace):
     settings = ForgeSettings(gate_import_check=False, gate_resolution=False)
     session = ChatSession(workspace, llm, settings, session_id="off")
     assert session.send("write broken.py") == "Wrote it."
+
+
+def test_building_from_nothing_is_not_split_into_steps(workspace):
+    """Plan-first helps when requirements are independent — two renames in
+    one file went 0/3 to 3/3 on it. A new package is the opposite: the
+    directory, its module and its exports are facets of one artifact.
+
+    Measured: the decomposer turned one small package into six requirements
+    ("a package is created", "__init__.py exists"), each ran in its own clean
+    context, and they fought — one created a stray __init__.py at the repo
+    root, another appended a bare name as a line of code.
+    """
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "mathkit/primes.py",
+                       "content": "def is_prime(n):\n    return n > 1\n"})]),
+        ChatMessage(role="assistant", tool_calls=[ToolCall(
+            name="write_file",
+            arguments={"path": "mathkit/__init__.py",
+                       "content": "from mathkit.primes import is_prime\n"})]),
+        ChatMessage(role="assistant", content="Built the package."),
+    ] + [ChatMessage(role="assistant", content="Done.")] * 4)
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="green")
+    session.send("create a mathkit package with is_prime and export it")
+    assert not any(
+        "Do exactly this one thing" in m.content
+        for req in llm.requests for m in req
+    )
+
+
+def test_an_existing_repo_still_gets_plan_first(workspace):
+    (workspace / "a.py").write_text("x = 1\n", encoding="utf-8")
+    (workspace / "b.py").write_text("y = 1\n", encoding="utf-8")
+    llm = MockLLMClient([
+        ChatMessage(role="assistant", content=(
+            '{"requirements": [{"id": 1, "text": "a.py sets x to 2"},'
+            ' {"id": 2, "text": "b.py sets y to 2"}]}'
+        )),
+    ] + [ChatMessage(role="assistant", content="ok")] * 12)
+    session = ChatSession(workspace, llm, ForgeSettings(), session_id="brown")
+    session.send("set x to 2 in a.py and set y to 2 in b.py")
+    assert any(
+        "Do exactly this one thing" in m.content
+        for req in llm.requests for m in req
+    )
