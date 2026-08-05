@@ -776,7 +776,55 @@ address contains exactly one '@' with non-empty text on both sides and a
 them is mechanical. That is the next build, and it is now the only thing
 standing between this tier and a score.
 
-**Running total: twenty-six defects, twenty-five outside the model.**
+### 3.5k Greenfield: the tier that measures what users actually ask for
+
+Every tier above hands the agent a repository to change. "Build me a project"
+— the thing people actually ask an AI engineer for — was never measured at
+all. T5 starts in an **empty directory**: build a two-module text tool, and
+create a package with a working `__init__.py`.
+
+**Baseline: 0/2, with half of all 44 tool calls failing.** The trace named
+one cause. Every instruction Forge has is written for a repository you are
+changing — *read before you edit, match the existing style, look up the
+symbol first* — and in an empty folder all of it is wrong. The model read
+`cli.py` four times, tried to append to files that did not exist, and called
+`github_repo` on a repository named after the tool itself.
+
+Two fixes, one of each kind:
+
+- **The prompt** now says what an empty folder means: decide the files, write
+  each one complete in one call, write a module before the one that imports
+  it, verify by importing or testing rather than by declaring success.
+- **The mechanical half**, which is the part that holds when the prompt is
+  ignored: `File not found` now names what the folder really contains, or
+  says outright that it is empty. A bare not-found leaves the model guessing
+  and it guesses the same wrong path again — four reads of one absent file in
+  a single run.
+
+**Result: still 0/4, but the flailing it targeted did stop** — tool
+reliability 50% → 68%, wasted cycle 34% → 15%, empty step 36% → 15%. The
+failures that remain are specific rather than chaotic, which is the point of
+the exercise.
+
+A third defect came out of those: **a package that exports nothing it
+defines.** Forge wrote `mathkit/primes.py` with `is_prime` and
+`primes_up_to`, then a `__init__.py` containing `__all__ = []` and no
+imports. Parses, resolves internally, and `from mathkit import is_prime`
+raises ImportError. The greenfield prompt written an hour earlier already
+said a package means an `__init__.py` that exports its names; it was ignored.
+So `unexported_package_errors` reports it mechanically — and **only for a
+package created in this session**, because Forge's own `forge/__init__.py`
+exports nothing and is entirely correct.
+
+**The convergence worth noting.** The remaining T5 failures are a package
+that was never imported and a `main(argv)` that read `sys.argv` and printed
+instead of returning. The remaining T3 failures are a predicate that is
+simply wrong. All of them would be caught by **running the thing that was
+just built** — and none of them can be caught by reading it. Two independent
+tiers now point at the same next contribution, which is the strongest signal
+in this document for what to build next.
+
+**Running total: twenty-nine defects, twenty-eight outside the model.**
 
 ### 3.6 What the first numbers already tell us
 
