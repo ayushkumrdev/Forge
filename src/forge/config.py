@@ -48,6 +48,10 @@ class ForgeSettings(BaseSettings):
     gate_false_verification: bool = True
     # Auto-inject the most relevant real code before the model generates
     gate_preflight: bool = True
+    # L4 of the ladder: import every Python module this turn created or
+    # changed, in a subprocess. Static checks cannot see a package that
+    # exports nothing, or a module that raises on import.
+    gate_import_check: bool = True
     # Reason about the request before changing anything. With FORGE_THINKER_MODEL
     # set, that model writes the brief; with one model, the model briefs itself.
     # Costs one call per action turn and is what the UI shows as the chain of

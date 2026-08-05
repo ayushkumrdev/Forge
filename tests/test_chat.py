@@ -217,7 +217,10 @@ def test_undo_restores_files(workspace):
                 tool_calls=[
                     ToolCall(
                         name="write_file",
-                        arguments={"path": "keep.py", "content": "changed"},
+                        # valid Python on purpose: the import rung runs on
+                        # every .py this turn writes, and "changed" alone is a
+                        # NameError — which it correctly reported
+                        arguments={"path": "keep.py", "content": "changed = 1\n"},
                     ),
                     ToolCall(
                         name="write_file",
@@ -230,7 +233,7 @@ def test_undo_restores_files(workspace):
     )
     session = _session(workspace, llm)
     session.send("change files")
-    assert (workspace / "keep.py").read_text(encoding="utf-8") == "changed"
+    assert (workspace / "keep.py").read_text(encoding="utf-8") == "changed = 1\n"
 
     restored = session.undo()
     assert set(restored) == {"keep.py", "new.py"}

@@ -68,6 +68,7 @@ from forge.verify.resolution import (
     undefined_self_call_errors,
     unexported_package_errors,
 )
+from forge.verify.runtime import import_errors
 from forge.verify.search import _search_temperatures, search
 
 CHAT_SYSTEM = """You are Forge, an elite autonomous AI software engineer running \
@@ -994,6 +995,14 @@ class ChatSession:
                 "it. If nothing defines it anywhere, write that function before "
                 "calling it."
             )
+        elif any("fails:" in p and "import " in p for p in problems):
+            remedy = (
+                "Import it yourself and read the error: run_command "
+                "`python -c \"import <module>\"`. If a package exports "
+                "nothing, its __init__.py needs `from <package>.<module> "
+                "import <name>` for each name callers use. If a name is "
+                "missing, define it or import it where it is used."
+            )
         elif any("recurses forever" in p for p in problems):
             remedy = (
                 "Put the original body back. Renaming a method does NOT change "
@@ -1064,6 +1073,16 @@ class ChatSession:
                     if self._issue_without_line(issue) not in before
                 ]
             problems.extend(f"{name}: {issue}" for issue in issues)
+        # L4, and only when nothing static is already wrong: importing a
+        # module that fails to parse tells you what L1 just told you, and the
+        # subprocess is the most expensive rung here.
+        if not problems and self.settings.gate_import_check:
+            touched = [
+                path
+                for path in self.ledger.originals
+                if path.suffix == ".py" and path.is_file()
+            ]
+            problems.extend(import_errors(self.workspace, touched))
         return problems[:4]
 
     def _search_requirement(
