@@ -41,6 +41,11 @@ ABLATIONS: dict[str, dict[str, bool]] = {
     "no-resolution": {"gate_resolution": False},
     "no-coverage": {"gate_coverage": False},
     "no-plan-first": {"gate_plan_first": False},
+    # reasoning-first is reported to HURT agents (NL2Repo-Bench: a
+    # "self-reinforcing echo chamber", 49% early-stop). It ships behind
+    # this switch precisely so the claim can be tested rather than assumed.
+    "no-intent-brief": {"gate_intent_brief": False},
+    "no-import-check": {"gate_import_check": False},
     "no-focused-retry": {"gate_focused_retry": False},
     "search-3": {"search_candidates": 3},
     "no-gates": {
@@ -53,6 +58,8 @@ ABLATIONS: dict[str, dict[str, bool]] = {
         "gate_resolution": False,
         "gate_coverage": False,
         "gate_focused_retry": False,
+        "gate_intent_brief": False,
+        "gate_import_check": False,
         "gate_plan_first": False,
     },
 }
