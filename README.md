@@ -217,9 +217,22 @@ on real fixture repositories, scored by hidden pytest suites the agent never
 sees — and reports not just whether it succeeded but *how it behaved*:
 
 ```powershell
-forge eval --tier 1 --seeds 3                  # baseline
+forge eval --seeds 3                           # all five tiers
+forge eval --tier 5 --seeds 2                  # greenfield: build from nothing
 forge eval --ablation no-gates                 # same tasks, gates disabled
 ```
+
+Five tiers: one edit, several requirements in one file, cross file, repository
+level, and greenfield, where the agent starts in an empty directory. Every
+task carries a verified reference solution and a test applies it, so an
+unsolvable task can never be mistaken for an agent failure. That mistake cost
+this project weeks before the guard existed.
+
+For external calibration there is `forge swebench`, which runs real SWE-bench
+Lite instances: Forge writes the patch against a clone at the base commit, and
+the official per-instance Docker image runs the held-out tests on the official
+criterion, meaning every target test passes and nothing that passed before
+breaks. It needs Docker running.
 
 | metric | meaning |
 | --- | --- |
@@ -228,11 +241,18 @@ forge eval --ablation no-gates                 # same tasks, gates disabled
 | **FVR** false-verification | claims tests ran when no command ran (lower better) |
 | **GER** grounded-edit | edits that landed on real, existing text |
 | **WCR** wasted-cycle | tool calls repeating an identical earlier call (lower better) |
+| **HIR** hallucinated-identifier | writes naming something that does not exist (lower better) |
+| **ESR** empty-step | steps that changed nothing at all (lower better) |
+
+ESR earns its place. One regression scored 100% tool reliability, 0% wasted
+cycles and 100% act-don't-tell while doing half the work it was asked for.
+ESR read 61% on that run and 5% after the fix, and no other metric noticed.
 
 Every gate has a kill-switch (`FORGE_GATE_ACTION=0`, `FORGE_SYNTAX_GATE=0`, …)
 so any mechanism can be ablated and attributed. Detection keeps running while
 a gate is off, so a disabled gate still *measures* what it would have caught.
-See [docs/RESEARCH_ROADMAP.md](docs/RESEARCH_ROADMAP.md).
+The write-up is [docs/PAPER.md](docs/PAPER.md); the working notes are in
+[docs/RESEARCH_ROADMAP.md](docs/RESEARCH_ROADMAP.md).
 
 ## Dashboard
 
