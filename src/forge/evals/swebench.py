@@ -183,7 +183,46 @@ def generate_patch(
         ["git", "-C", str(workspace), "diff"],
         capture_output=True, text=True, timeout=120,
     )
-    return diff.stdout, ""
+    return strip_test_changes(diff.stdout), ""
+
+
+_FILE_HEADER = re.compile(r"^diff --git a/(\S+) b/\S+", re.MULTILINE)
+
+
+def _is_test_path(path: str) -> bool:
+    parts = path.split("/")
+    name = parts[-1]
+    return (
+        name.startswith("test_")
+        or name.endswith("_test.py")
+        or name == "conftest.py"
+        or any(part in ("tests", "test", "testing") for part in parts[:-1])
+    )
+
+
+def strip_test_changes(patch: str) -> str:
+    """Drop the agent's edits to test files.
+
+    The held-out test patch is applied on top of the prediction, so a
+    prediction that also touches the tests collides with it and the instance
+    fails for a reason that has nothing to do with the fix. Every SWE-bench
+    harness discards test changes for this reason.
+
+    It is worth naming what this hides: the model was told the tests already
+    exist and wrote one anyway, on the very first instance we ran. That is a
+    real behaviour and it belongs in the discussion, not in the score.
+    """
+    if not patch.strip():
+        return patch
+    kept: list[str] = []
+    keeping = False
+    for line in patch.splitlines(keepends=True):
+        header = _FILE_HEADER.match(line)
+        if header:
+            keeping = not _is_test_path(header.group(1))
+        if keeping:
+            kept.append(line)
+    return "".join(kept)
 
 
 _SUMMARY = re.compile(r"^(PASSED|FAILED|ERROR)\s+(\S+)", re.MULTILINE)

@@ -107,3 +107,66 @@ def test_the_report_separates_no_patch_from_a_wrong_patch(tmp_path: Path):
 def test_an_empty_report_does_not_divide_by_zero():
     assert SWEBenchReport().resolved_rate() == 0.0
     assert SWEBenchReport().summary()["instances"] == 0
+
+
+# -- the prediction must not touch the tests --------------------------------------
+# The held-out test patch is applied on top of the prediction, so a prediction
+# that also edits tests collides with it and the instance fails for a reason
+# unrelated to the fix. On the very first real instance we ran, the model was
+# told the tests already existed and wrote one anyway.
+
+
+def test_test_file_changes_are_dropped():
+    from forge.evals.swebench import strip_test_changes
+
+    patch = (
+        "diff --git a/src/flask/app.py b/src/flask/app.py\n"
+        "--- a/src/flask/app.py\n"
+        "+++ b/src/flask/app.py\n"
+        "@@ -1 +1,2 @@\n"
+        "+real = 1\n"
+        "diff --git a/tests/test_blueprints.py b/tests/test_blueprints.py\n"
+        "--- a/tests/test_blueprints.py\n"
+        "+++ b/tests/test_blueprints.py\n"
+        "@@ -1 +1,2 @@\n"
+        "+def test_invented(): ...\n"
+    )
+    kept = strip_test_changes(patch)
+    assert "src/flask/app.py" in kept
+    assert "real = 1" in kept
+    assert "test_blueprints" not in kept
+    assert "test_invented" not in kept
+
+
+def test_the_source_change_survives_on_its_own():
+    from forge.evals.swebench import strip_test_changes
+
+    patch = (
+        "diff --git a/requests/models.py b/requests/models.py\n"
+        "--- a/requests/models.py\n"
+        "+++ b/requests/models.py\n"
+        "@@ -1 +1,2 @@\n"
+        "+fixed = True\n"
+    )
+    assert strip_test_changes(patch) == patch
+
+
+def test_every_shape_of_test_path_is_recognised():
+    from forge.evals.swebench import _is_test_path
+
+    for path in (
+        "tests/test_x.py",
+        "src/pkg/tests/helpers.py",
+        "test/test_y.py",
+        "pkg/thing_test.py",
+        "tests/conftest.py",
+    ):
+        assert _is_test_path(path), path
+    for path in ("src/flask/app.py", "requests/models.py", "src/latest/contest.py"):
+        assert not _is_test_path(path), path
+
+
+def test_an_empty_patch_stays_empty():
+    from forge.evals.swebench import strip_test_changes
+
+    assert strip_test_changes("") == ""
