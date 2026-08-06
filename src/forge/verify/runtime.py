@@ -28,6 +28,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from forge import process
+
 _TIMEOUT_SECONDS = 20
 _MAX_REPORTED = 3
 # Files whose import is meaningless or actively unhelpful to run: a test
@@ -88,7 +90,7 @@ def import_errors(
     problems: list[str] = []
     for module in modules:
         try:
-            completed = subprocess.run(
+            completed = process.run(
                 [sys.executable, "-c", f"import {module}"],
                 cwd=workspace,
                 capture_output=True,

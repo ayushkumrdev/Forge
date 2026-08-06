@@ -20,6 +20,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from forge import process
 from forge.chat.session import ChatSession
 from forge.config import ForgeSettings
 from forge.evals.metrics import TrajectoryMetrics, aggregate, metrics_from_events
@@ -130,7 +131,7 @@ def score(task: Task, workspace: Path) -> tuple[bool, str]:
     check_path = workspace / _HIDDEN_TEST
     check_path.write_text(task.check, encoding="utf-8")
     try:
-        completed = subprocess.run(
+        completed = process.run(
             [sys.executable, "-m", "pytest", _HIDDEN_TEST, "-q", "--no-header", "-p",
              "no:cacheprovider"],
             cwd=workspace,

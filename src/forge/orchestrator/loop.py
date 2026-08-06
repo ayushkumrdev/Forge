@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
 import time
 from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from forge import process
 from forge.agents.coder import Coder
 from forge.agents.planner import Plan, Planner, PlanTask
 from forge.agents.reviewer import Review, Reviewer
@@ -318,7 +318,7 @@ class ExecutionLoop:
         for command in self.check_commands:
             try:
                 self._guard.check_command(command)
-                completed = subprocess.run(
+                completed = process.run(
                     command,
                     shell=True,
                     cwd=self.workspace,

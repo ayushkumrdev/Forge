@@ -30,6 +30,7 @@ import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from forge import process
 from forge.tools.syntax_check import syntax_error
 from forge.verify.resolution import resolution_errors
 
@@ -167,7 +168,7 @@ class Ladder:
         target = scratch / path.name
         try:
             target.write_text(new_content, encoding="utf-8")
-            completed = subprocess.run(
+            completed = process.run(
                 [checker, str(target)],
                 capture_output=True,
                 text=True,

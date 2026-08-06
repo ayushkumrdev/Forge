@@ -218,30 +218,68 @@ def desktop_app(
         js_api=Bridge(),
         background_color="#0d1117",
     )
-    webview.start()
+    # the spark, so the window and taskbar carry the mark the app uses
+    # everywhere else. Older pywebview builds do not take an icon, and a
+    # missing icon is not worth refusing to start over.
+    try:
+        webview.start(icon=str(app_icon()))
+    except TypeError:
+        webview.start()
+
+
+def app_icon() -> Path:
+    """The multi resolution .ico shipped beside the web assets."""
+    return Path(__file__).resolve().parent / "server" / "static" / "forge.ico"
+
+
+def launch_app() -> None:
+    """Entry point for the windowed launcher.
+
+    Declared under [project.gui-scripts], which builds a GUI subsystem exe.
+    The console script opens a black cmd window every time the desktop app
+    starts, which is what the user actually sees when they double click the
+    shortcut.
+    """
+    app(["app"])
 
 
 @app.command()
 def shortcut() -> None:
     """Put a Forge shortcut on the Windows desktop (launches the app window)."""
-    import subprocess
     import sys
 
-    forge_exe = Path(sys.executable).parent / "forge.exe"
-    if not forge_exe.exists():
-        console.print(f"[red]forge.exe not found at {forge_exe}[/red]")
+    from forge import process
+
+    # forge-app.exe is the GUI subsystem build and starts without a console
+    # window; forge.exe is the console script and flashes one every launch.
+    scripts = Path(sys.executable).parent
+    windowed = (scripts / "forge-app.exe").exists()
+    target = scripts / ("forge-app.exe" if windowed else "forge.exe")
+    if not target.exists():
+        console.print(f"[red]No Forge executable found in {scripts}[/red]")
         raise typer.Exit(1)
+    if not windowed:
+        console.print(
+            "[yellow]forge-app.exe is missing, so the shortcut will flash a "
+            "console window. Reinstall with 'pip install -e .' to get it."
+            "[/yellow]"
+        )
     script = (
         "$ws = New-Object -ComObject WScript.Shell; "
         "$lnk = $ws.CreateShortcut([IO.Path]::Combine("
         "[Environment]::GetFolderPath('Desktop'), 'Forge.lnk')); "
-        f"$lnk.TargetPath = '{forge_exe}'; "
-        "$lnk.Arguments = 'app'; "
+        f"$lnk.TargetPath = '{target}'; "
+        # always assigned, never omitted: CreateShortcut opens an existing
+        # .lnk rather than replacing it, so a field left unset keeps whatever
+        # the previous shortcut had. The windowed launcher takes no arguments
+        # and inheriting a stale 'app' would pass it one.
+        + ("$lnk.Arguments = ''; " if windowed else "$lnk.Arguments = 'app'; ")
+        + f"$lnk.IconLocation = '{app_icon()}'; "
         f"$lnk.WorkingDirectory = '{Path.home()}'; "
         "$lnk.Description = 'Forge - local AI software engineer'; "
         "$lnk.Save()"
     )
-    completed = subprocess.run(
+    completed = process.run(
         ["powershell", "-NoProfile", "-Command", script],
         capture_output=True,
         text=True,

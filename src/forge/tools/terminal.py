@@ -7,6 +7,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from forge import process
 from forge.safety.guard import SafetyGuard
 from forge.tools.base import Tool, ToolResult
 
@@ -15,7 +16,7 @@ def _run_process(
     args: list[str] | str, shell: bool, cwd: Path, timeout: float
 ) -> ToolResult:
     try:
-        completed = subprocess.run(
+        completed = process.run(
             args,
             shell=shell,
             cwd=cwd,

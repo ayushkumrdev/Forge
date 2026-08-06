@@ -8,6 +8,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from forge import process
 from forge.tools.base import Tool, ToolResult
 
 _ALLOWED_SUBCOMMANDS = {
@@ -48,7 +49,7 @@ class GitTool(Tool):
                 f"Allowed: {', '.join(sorted(_ALLOWED_SUBCOMMANDS))}",
             )
         try:
-            completed = subprocess.run(
+            completed = process.run(
                 ["git", *tokens],
                 cwd=self._workspace,
                 capture_output=True,

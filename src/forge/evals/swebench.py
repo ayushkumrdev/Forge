@@ -30,6 +30,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from forge import process
 from forge.config import ForgeSettings
 
 DATASET = "princeton-nlp/SWE-bench_Lite"
@@ -126,21 +127,21 @@ def prepare_workspace(instance: Instance, root: Path, cache: Path) -> Path:
     mirror = cache / instance.repo.replace("/", "__")
     if not mirror.exists():
         mirror.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
+        process.run(
             ["git", "clone", f"https://github.com/{instance.repo}.git", str(mirror)],
             check=True, timeout=_CLONE_TIMEOUT, capture_output=True,
         )
     workspace = root / instance.instance_id
     if workspace.exists():
-        subprocess.run(["git", "-C", str(workspace), "clean", "-fdx"], capture_output=True)
-        subprocess.run(["git", "-C", str(workspace), "reset", "--hard"], capture_output=True)
+        process.run(["git", "-C", str(workspace), "clean", "-fdx"], capture_output=True)
+        process.run(["git", "-C", str(workspace), "reset", "--hard"], capture_output=True)
     else:
         workspace.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
+        process.run(
             ["git", "clone", "--shared", str(mirror), str(workspace)],
             check=True, timeout=_CLONE_TIMEOUT, capture_output=True,
         )
-    subprocess.run(
+    process.run(
         ["git", "-C", str(workspace), "checkout", "--force", instance.base_commit],
         check=True, timeout=_CLONE_TIMEOUT, capture_output=True,
     )
@@ -179,7 +180,7 @@ def generate_patch(
         session.send(_request(instance))
     except Exception as exc:  # noqa: BLE001 — a crashed run is a failed instance
         return "", f"{type(exc).__name__}: {exc}"
-    diff = subprocess.run(
+    diff = process.run(
         ["git", "-C", str(workspace), "diff"],
         capture_output=True, text=True, timeout=120,
     )
@@ -262,7 +263,7 @@ def evaluate(instance: Instance, patch: str, workdir: Path) -> InstanceResult:
         encoding="utf-8", newline="\n",
     )
     try:
-        completed = subprocess.run(
+        completed = process.run(
             [
                 "docker", "run", "--rm",
                 "-v", f"{workdir.resolve()}:/work",

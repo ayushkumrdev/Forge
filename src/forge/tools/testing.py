@@ -21,6 +21,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from forge import process
 from forge.safety.guard import SafetyGuard
 from forge.tools.base import Tool, ToolResult
 
@@ -131,7 +132,7 @@ class RunTestsTool(Tool):
             )
         timeout = min(timeout_s or self._default_timeout_s, 600.0)
         try:
-            completed = subprocess.run(
+            completed = process.run(
                 command,
                 cwd=self._workspace,
                 capture_output=True,

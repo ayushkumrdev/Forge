@@ -33,6 +33,11 @@ dev = [
 [project.scripts]
 forge = "forge.cli:app"
 
+# GUI subsystem build: launching the desktop app through the console
+# script opens a cmd window behind it every single time.
+[project.gui-scripts]
+forge-app = "forge.cli:launch_app"
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/forge"]
 
