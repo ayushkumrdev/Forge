@@ -128,9 +128,23 @@ Pick how hard Forge thinks (welcome screen or top bar, switchable mid-chat):
 
 | Level | What you get |
 | --- | --- |
-| **Fast** | Snappy: no intent brief, no retrieval pre-flight, smaller step budget |
-| **Smart** | Default: retrieval pre-flight + grounding gates + thinker (if configured) |
-| **Genius** | Highest: dual-model intent brief (self-briefs when no thinker is set), a final completeness check that re-reads your request before answering, 1.5× step budget |
+| **Fast** | Snappy: no retrieval pre-flight, smaller step budget |
+| **Smart** | Default: retrieval pre-flight, every grounding gate, plan-first execution |
+| **Genius** | Three verified attempts per requirement, a deeper budget inside each step, an extra repair pass, 1.5× steps, and a completeness check before answering |
+
+Genius is the one that actually costs something. It runs each requirement
+several times at different temperatures in isolation and keeps whichever
+attempt genuinely did the job, which is the lever that buys capability when
+the model cannot be made bigger. It is slower, and on a hard task noticeably
+so.
+
+Self-briefing, where the model reasons about the request before touching
+anything, is **off** by default. That is measured rather than assumed: turning
+it on cost one benchmark task 2/3 of its passes and took false verification
+from 14% to 48%. A 7B that reasons about work before doing it talks itself
+into having done it. A genuinely separate thinker model is a different
+proposition and still works, via `FORGE_THINKER_MODEL` plus
+`FORGE_GATE_INTENT_BRIEF=1`.
 
 ## Two-model brain
 
