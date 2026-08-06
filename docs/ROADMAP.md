@@ -369,13 +369,46 @@ model changed; what changed is *when* its attention is spent.
 - The app shows the plan and marks each step, so multi-part work no longer
   arrives as a run of unexplained edits.
 
-## Milestone 25 — Execution isolation & scale
+## ✅ Milestone 25 — Greenfield, L4, and the paper
+Forge builds a project from an empty folder for the first time
+(`t5-build-package`, three tool calls, 35 seconds).
+- **T5 greenfield tier**: the agent starts in an empty directory. Baseline was
+  0/2 with half of all tool calls failing, because every instruction Forge has
+  assumes a repository to change. The prompt now says what an empty folder
+  means, and `File not found` names what the folder really contains instead of
+  leaving the model to guess the same wrong path again.
+- **L4 runtime rung** (`verify/runtime.py`): imports every module the turn
+  wrote, in a subprocess. Catches what no static rung can, such as a package
+  whose `__init__.py` exports nothing. Found a real bug in Forge's own suite
+  on the way in.
+- **`unexported_package_errors`**: a newly created package that exports
+  nothing its modules define. Only judges packages created in this session,
+  since a namespace package is a legitimate style.
+- **Plan-first is now limited, not extended**: an empty workspace skips
+  decomposition. Splitting one package into six isolated steps made them fight
+  each other. Decomposition helps for independent requirements and harms one
+  coherent artifact.
+- **L2 relaxed for a package under construction**: `from .primes import x`
+  written before `primes.py` exists is correct, and refusing it pushed the
+  model into an export-free `__init__.py`. Forge was causing the defect its
+  own check reported.
+- **Enforced verification**: when the model claims the checks ran and no
+  command was issued, Forge runs them and hands back the real output.
+- **Self-briefing measured and reverted**: it cost `t3-wire-validator` 2/3,
+  took false verification from 14.3% to 47.6% and dropped act-don't-tell from
+  100% to 94.3%. Off by default, with the measurement beside it.
+- **`forge swebench`**: real SWE-bench Lite instances, patches generated
+  locally and scored inside the official Docker images on the official
+  criterion.
+- **`docs/PAPER.md`**: the write-up, with every number traced to a run.
+
+## Milestone 26 — Execution isolation & scale
 - Docker sandbox for `run_command` (Docker SDK), per-run containers
 - PostgreSQL replaces SQLite behind `MemoryStore`
 - OpenTelemetry tracing; Prometheus metrics
 - Multi-repo, multi-run concurrency
 
-## Milestone 26 — More agents & evaluation
+## Milestone 27 — More agents & evaluation
 - Research, Documentation, Git (branch/PR), Testing agents
 - Evaluation engine: task success rate, patch quality, hallucination rate,
   historical metrics; SWE-bench-style benchmark harness
