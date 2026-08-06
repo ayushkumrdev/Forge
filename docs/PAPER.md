@@ -1,8 +1,8 @@
 # Scaffold, Not Scale: What Actually Limits a 7B Coding Agent
 
-**Working draft. Every number in this paper comes from a recorded run in this
-repository. Nothing is estimated. Where a measurement is still pending it is
-marked TODO and left empty.**
+**Working draft. Every number in this paper comes from a recorded run in
+this repository. Nothing is estimated, and no figure has been replaced after
+the fact by a more flattering one.**
 
 ---
 
@@ -21,6 +21,11 @@ thirty one defects, thirty were in the scaffold and one was a limitation of
 the model. Task success rose from 23.8 to 56.7 percent with the model, its
 weights and its context budget untouched. Two tasks that had never once
 succeeded reached 3/3 and 1/4.
+
+On five real SWE-bench Lite instances the same system produced a well formed,
+cleanly applying patch every time and resolved none of them, which locates
+the boundary precisely: verification makes a change sound, and it does
+nothing to find the right place to make it.
 
 Three findings look transferable. Diff aware verification, meaning checks
 that are wrong only relative to the previous state of the repository, catches
@@ -64,6 +69,10 @@ limit, tracing showed otherwise. Thirty one defects, thirty of them ours.
 5. SWE-micro (section 4), a tiered benchmark in which every task carries a
    verified reference solution, so an unsolvable task cannot be mistaken for
    an agent failure. We made exactly that mistake and it cost us weeks.
+6. A measured boundary (section 6.7): on real SWE-bench instances the
+   scaffold produces well formed patches every time and resolves nothing,
+   because the binding constraint there is localisation rather than
+   soundness, and nothing in section 3 addresses localisation.
 
 ---
 
@@ -280,7 +289,12 @@ to 4 alone the same run gives 15/30 against 17/30 previously, which is a
 regression of two tasks. Section 6.5 identifies the cause and reports what
 happened when we removed it.
 
-TODO: measure again after the section 6.5 revert.
+This run had self briefing enabled, which section 6.5 shows was a mistake, so
+the aggregate above measures a configuration we no longer ship. The targeted
+ablation in section 6.5 is the trustworthy figure for the affected tasks, and
+a full suite run under the shipped configuration is outstanding. We leave the
+flawed number in place rather than quietly replacing it, because the sequence
+of measurements is itself the argument of section 5.
 
 ### 6.2 The two tasks that had never passed
 
@@ -398,13 +412,58 @@ separates a clean run from a run that barely happened.
 
 ### 6.7 External calibration on SWE-bench
 
-TODO: results of the SWE-bench Lite probe. The adapter generates patches
-locally and evaluates them inside the official per instance Docker images,
-scoring an instance as resolved only when every FAIL_TO_PASS test passes and
-no PASS_TO_PASS test breaks. We expect a very low absolute number at this
-model size and report whatever we get. The informative quantity is whether
-Forge produces a well formed but wrong patch or produces nothing at all,
-since those are different failures and the report separates them.
+We ran five SWE-bench Lite instances from the smaller repositories in the
+set, generating patches locally and evaluating them inside the official per
+instance Docker images on the official criterion.
+
+| instance | resolved | target tests passing | patch |
+| --- | --- | --- | --- |
+| pallets__flask-4045 | no | 0/2 | 913 bytes |
+| pallets__flask-4992 | no | 0/1 | 1750 bytes |
+| psf__requests-1963 | no | 0/7 | 860 bytes |
+| psf__requests-2674 | no | 0/12 | 1876 bytes |
+| psf__requests-3362 | no | 0/1 | 6172 bytes |
+
+**Resolved: 0/5. Produced a patch: 5/5.**
+
+The absolute number is what we predicted and it is not the interesting part.
+Three things in this table are.
+
+First, every patch applied. The evaluation reached the test stage on all five
+instances, meaning the diffs were well formed against the real repository at
+the real base commit. The scaffold does what it was built to do. Nothing
+here failed because Forge emitted something unusable.
+
+Second, no target test passed anywhere. This is not a near miss that better
+verification would convert. Reading the patches shows why: on flask-4045 the
+model appended `import flask` to an unrelated file under `examples/` and then
+wrote a new test into `tests/test_blueprints.py`, having been told explicitly
+that the tests already exist. The failure is localisation. Asked to fix a
+described behaviour in an unfamiliar repository of a few hundred files, a 7B
+does not find the responsible code, and no amount of checking a change
+against the repository helps when the change is in the wrong file.
+
+Third, that is a clean statement of where our thesis stops. Every mechanism
+in section 3 answers the question "is this change sound relative to the
+repository". None of them answers "is this the right place to change". On
+SWE-micro the target file is usually implied by the request, so the question
+never arises; on SWE-bench it is most of the problem. We think this is the
+honest boundary of scaffolding as capability, and it is a more useful result
+than a slightly better score would have been.
+
+It also sharpens the crossover experiment in section 9. The prediction it
+makes is specific: as model size rises, localisation stops being the binding
+constraint, and only then do the section 3 mechanisms start to show on
+SWE-bench. If that is what the matrix shows, the conditional claim in section
+2 has a measured shape rather than a rhetorical one.
+
+One adapter defect worth recording, because the score would otherwise have
+absorbed it silently. Our first version passed the model's whole diff to the
+evaluator, including its edits to test files, which collide with the held out
+test patch. Every SWE-bench harness discards test changes and ours did not.
+We now strip them, and we note here what stripping hides: on the first
+instance we ever ran, the model was told the tests already existed and wrote
+one anyway.
 
 ---
 
